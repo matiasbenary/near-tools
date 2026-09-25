@@ -10,6 +10,8 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { apyLabel, apyNum, Validator } from '@/lib/staking';
+import { NetworkConfig } from '@/config';
+import { useNetwork } from '@/components/app-providers';
 
 type Props = {
   validators: Validator[];
@@ -40,17 +42,20 @@ export function ValidatorList({
   onRetry,
   onSelect,
 }: Props) {
+  const { network } = useNetwork();
   const [sorting, setSorting] = useState<SortingState>([{ id: 'apy', desc: true }]);
+  const [search, setSearch] = useState('');
   const liquidValidators = useMemo(() => validators.filter((validator) => validator.liquid), [validators]);
   const directValidators = useMemo(
     () =>
       validators.filter(
         (validator) =>
           !validator.liquid &&
-          validator.uptime !== undefined &&
-          apyNum(baseApy, fees[validator.id]) > 0
+          // testnet ships no metrics, so filtering on them would empty the list
+          (network === 'testnet' ||
+            (validator.uptime !== undefined && apyNum(baseApy, fees[validator.id]) > 0))
       ),
-    [validators, baseApy, fees]
+    [validators, baseApy, fees, network]
   );
 
   const columns = useMemo<ColumnDef<Validator>[]>(
@@ -84,8 +89,14 @@ export function ValidatorList({
     [baseApy, fees]
   );
 
+  const query = search.trim().toLowerCase();
+  const shownValidators = useMemo(
+    () => (query ? directValidators.filter((v) => v.id.toLowerCase().includes(query)) : directValidators),
+    [directValidators, query]
+  );
+
   const table = useReactTable({
-    data: directValidators,
+    data: shownValidators,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -102,8 +113,9 @@ export function ValidatorList({
     <tr
       key={validator.id}
       className={validator.id === selected ? 'active' : ''}
-      tabIndex={busy ? -1 : 0}
-      aria-selected={validator.id === selected}
+      role="radio"
+      aria-checked={validator.id === selected}
+      tabIndex={busy ? -1 : validator.id === selected ? 0 : -1}
       onClick={select}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -149,7 +161,19 @@ export function ValidatorList({
       <div className="validator-heading">
         <div>
           <h2>Validators</h2>
+          <p className="meta" role="status">
+            {shownValidators.length} of {directValidators.length} shown
+          </p>
         </div>
+        <label className="validator-search">
+          <span className="sr-only">Search validators</span>
+          <input
+            type="search"
+            value={search}
+            placeholder="Search pools…"
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
       </div>
       <div className="validator-table-wrap">
         <table className="validator-table">
@@ -157,7 +181,17 @@ export function ValidatorList({
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <th key={header.id} scope="col">
+                  <th
+                    key={header.id}
+                    scope="col"
+                    aria-sort={
+                      header.column.getIsSorted() === 'asc'
+                        ? 'ascending'
+                        : header.column.getIsSorted() === 'desc'
+                          ? 'descending'
+                          : 'none'
+                    }
+                  >
                     <button
                       className="table-sort"
                       onClick={header.column.getToggleSortingHandler()}
@@ -176,7 +210,7 @@ export function ValidatorList({
               </tr>
             ))}
           </thead>
-          <tbody>
+          <tbody role="radiogroup" aria-label="Validator">
             {table.getRowModel().rows.map((row) => renderRow(row.original))}
           </tbody>
         </table>
@@ -193,12 +227,15 @@ export function ValidatorList({
         {validators.length > 0 && directValidators.length === 0 && (
           <p className="hint">No validators with a positive net APY are available.</p>
         )}
+        {directValidators.length > 0 && shownValidators.length === 0 && (
+          <p className="hint">No pool matches “{search}”.</p>
+        )}
       </div>
       <p className="hint">
         Find more information on validators at{' '}
         <a
           className="validator-info-link"
-          href="https://nearblocks.io/validators"
+          href={NetworkConfig[network].explorerUrl}
           target="_blank"
           rel="noreferrer"
         >

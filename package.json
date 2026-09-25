@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
+    "check": "tsc --noEmit && node scripts/check-actions.ts",
     "fetch:validators": "node scripts/fetch-validators.mjs",
     "prebuild": "npm run fetch:validators",
     "build": "next build",
@@ -15,6 +16,8 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^8.21.3",
+    "downshift": "^9.4.0",
+    "lucide-react": "^1.47.0",
     "near-api-js": "^7.2.0",
     "near-connect-hooks": "^1.1.6",
     "next": "^15.5.20",

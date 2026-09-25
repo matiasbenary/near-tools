@@ -1,9 +1,7 @@
-import { nearToYocto, teraToGas, yoctoToNear } from 'near-api-js';
+import { nearToYocto } from 'near-api-js';
+import { NetworkId } from '@/config';
 
-export const GAS = teraToGas('30');
 export const GAS_RESERVE = nearToYocto(0.1); // keep 0.1 Ⓝ in the wallet for gas
-export const MIN_DISPLAY_NEAR = 10n ** 22n; // 0.01 Ⓝ at the displayed precision
-export const FASTNEAR = 'https://api.fastnear.com';
 
 export type Validator = {
   id: string;
@@ -29,12 +27,6 @@ export type ValidatorData = {
   apy: number | null;
 };
 
-// ponytail: first line + truncation — RPC errors are multi-line JSON blobs
-export const errMsg = (e: unknown) => {
-  const s = (e instanceof Error ? e.message : String(e)).split('\n')[0];
-  return s.length > 160 ? s.slice(0, 160) + '…' : s;
-};
-
 export const apyNum = (baseApy: number | null, fee: number | undefined) =>
   baseApy !== null && fee !== undefined ? baseApy * (1 - fee) : -1;
 
@@ -43,17 +35,11 @@ export const apyLabel = (baseApy: number | null, fee: number | undefined) => {
   return n >= 0 ? `${n.toFixed(1)}%` : '—';
 };
 
-export const formatNearBalance = (amount: bigint) =>
-  amount > 0n && amount < MIN_DISPLAY_NEAR
-    ? '< 0.01 Ⓝ'
-    : `${yoctoToNear(amount, 2)} Ⓝ`;
+/** Meta Pool's fast exit refuses to pay out less than 95% of the quoted NEAR. */
+export const minFastUnstake = (expected: bigint) => (expected * 95n) / 100n;
 
-export const formatTokenBalance = (amount: bigint, token: string) =>
-  amount > 0n && amount < MIN_DISPLAY_NEAR
-    ? `< 0.01 ${token}`
-    : `${yoctoToNear(amount, 2)} ${token}`;
-
-export async function getValidatorData(): Promise<ValidatorData> {
+export async function getValidatorData(network: NetworkId): Promise<ValidatorData> {
+  if (network === 'testnet') return { pools: [], fees: {}, apy: null };
   const response = await fetch('./validators.json');
   if (!response.ok) throw new Error(`Validator snapshot request failed (${response.status})`);
   return response.json() as Promise<ValidatorData>;

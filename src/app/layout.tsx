@@ -4,6 +4,7 @@ import { Inter, JetBrains_Mono } from 'next/font/google';
 import { Navigation } from '@/components/navigation';
 import { ReactNode } from 'react';
 import { AppProviders } from '@/components/app-providers';
+import { SiteFooter } from '@/components/site-footer';
 
 const sans = Inter({
   subsets: ['latin'],
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <AppProviders>
           <Navigation />
           {children}
+          <SiteFooter />
         </AppProviders>
       </body>
     </html>

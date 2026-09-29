@@ -34,11 +34,14 @@ export function loadDropKeys(network: NetworkId, dropId: string): DropKey[] {
   }
 }
 
-/** Appends, never replaces — a drop can be topped up with more links later. */
+/**
+ * Replaces, never appends: every create returns a fresh drop id, and near-drop
+ * ids restart at 0 after a redeploy — appending merged a stale drop's keys into
+ * the new one. ponytail: add an append path if top-ups ever ship.
+ */
 export function saveDropKeys(network: NetworkId, dropId: string, keys: DropKey[]) {
   try {
-    const merged = [...loadDropKeys(network, dropId), ...keys];
-    window.localStorage.setItem(storageKey(network, dropId), JSON.stringify(merged));
+    window.localStorage.setItem(storageKey(network, dropId), JSON.stringify(keys));
     return true;
   } catch {
     return false;

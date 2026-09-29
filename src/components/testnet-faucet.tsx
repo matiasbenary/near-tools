@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { SubmitEvent, useEffect, useState } from 'react';
 import {
   Account,
   JsonRpcProvider,
@@ -57,9 +57,9 @@ export function TestnetFaucet({ accountId }: { accountId: string }) {
     if (!beneficiary && accountId) setBeneficiary(accountId);
   }, [accountId, beneficiary]);
 
-  const requestFunds = async (event: FormEvent<HTMLFormElement>) => {
+  const requestFunds = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const target = beneficiary.trim();
+    const target = beneficiary.trim().toLowerCase();
     if (!isTestnetBeneficiary(target)) {
       setError('Enter a .testnet account, implicit account, or 0x account.');
       return;

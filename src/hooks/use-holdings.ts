@@ -6,12 +6,7 @@ import { JsonRpcProvider } from 'near-api-js';
 import { useNetwork } from '@/components/app-providers';
 import { NetworkConfig, RpcUrls } from '@/config';
 import { ActionContracts } from '@/lib/actions/contracts';
-import {
-  DropKey,
-  loadDropKeys,
-  loadDropName,
-  loadStoredDropIds,
-} from '@/lib/actions/linkdrop-keys';
+import { DropKey, loadDropKeys, loadDropName, loadStoredDropIds } from '@/lib/actions/linkdrop-keys';
 
 export type HeldToken = {
   contractId: string;
@@ -77,6 +72,68 @@ export function useHoldings(accountId: string) {
       });
 
       return [nearBalance, ...tokens];
+    },
+  });
+}
+
+export type FtStorage = {
+  /** Contracts on the Ref Finance whitelist. */
+  verified: Set<string>;
+  /** NEAR locked as storage in each empty or unverified token this account is registered with. */
+  locked: Map<string, bigint>;
+  /** Registered tokens with a zero balance — NearBlocks' inventory leaves them out. */
+  empty: string[];
+};
+
+/** Which tokens are verified, and which registrations can be removed to get their storage NEAR back. */
+export function useFtStorage(accountId: string) {
+  const { viewFunction } = useNearWallet();
+  const { network } = useNetwork();
+
+  return useQuery({
+    queryKey: ['ft-storage', network, accountId],
+    enabled: accountId.length > 0,
+    staleTime: 60_000,
+    queryFn: async (): Promise<FtStorage> => {
+      const [list, whitelist] = await Promise.all([
+        // FastNEAR lists every token the account touched, zero balances included.
+        fetch(`${NetworkConfig[network].fastNearUrl}/v1/account/${accountId}/ft`).then((response) => {
+          if (!response.ok) throw new Error(`FastNEAR token list failed (${response.status})`);
+          return response.json() as Promise<{
+            tokens?: { contract_id: string; balance: string }[];
+          }>;
+        }),
+        viewFunction({
+          contractId: NetworkConfig[network].verifiedTokens,
+          method: 'get_whitelisted_tokens',
+        }) as Promise<string[]>,
+      ]);
+      const verified = new Set(whitelist);
+      const candidates = (list.tokens ?? []).filter((t) => t.balance === '0' || !verified.has(t.contract_id));
+
+      // Direct provider: a contract without NEP-145 panics, which the wallet's provider logs as an error.
+      const directRpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
+      const locked = new Map<string, bigint>();
+      // ponytail: 10 calls at a time keeps the free RPC from rate-limiting; an account with hundreds of tokens takes a few seconds
+      for (let i = 0; i < candidates.length; i += 10)
+        await Promise.all(
+          candidates.slice(i, i + 10).map(async (t) => {
+            const storage = (await directRpc
+              .callFunction({
+                contractId: t.contract_id,
+                method: 'storage_balance_of',
+                args: { account_id: accountId },
+              })
+              .catch(() => null)) as { total?: string } | null;
+            if (storage?.total) locked.set(t.contract_id, BigInt(storage.total));
+          })
+        );
+
+      return {
+        verified,
+        locked,
+        empty: candidates.filter((t) => t.balance === '0' && locked.has(t.contract_id)).map((t) => t.contract_id),
+      };
     },
   });
 }

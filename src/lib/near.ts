@@ -17,6 +17,14 @@ export const formatNear = (amount: bigint, unit = 'Ⓝ') =>
 /** Full precision, no grouping commas — what a number <input> accepts. */
 export const toInputAmount = (amount: bigint) => yoctoToNear(amount).replace(/,/g, '');
 
+/**
+ * A plain decimal with at most `decimals` places. A number <input> also accepts
+ * "1e3", "-1" and over-precise values, which the unit converters throw on or
+ * turn into garbage — check this before converting.
+ */
+export const isAmount = (value: string, decimals: number) =>
+  /^\d+(\.\d+)?$/.test(value) && (value.split('.')[1]?.length ?? 0) <= decimals;
+
 /** NEAR returns a FinalExecutionOutcome; the hash lives in a couple of shapes. */
 export function txHashOf(outcome: unknown): string | undefined {
   const o = outcome as

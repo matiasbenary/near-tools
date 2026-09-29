@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { useNearWallet } from 'near-connect-hooks';
-import { Check, Copy, Send, Trash2, X } from 'lucide-react';
+import { Check, Copy, Send, Trash2, TriangleAlert, X } from 'lucide-react';
 import { useNetwork } from '@/components/app-providers';
 import { Field, useForm } from '@/components/actions/form-fields';
 import { HeldToken, KeypomDrop, OwnedNft } from '@/hooks/use-holdings';
@@ -10,6 +10,7 @@ import { ActionContracts, fromUnits, toUnits } from '@/lib/actions/contracts';
 import { claimUrl } from '@/lib/actions/linkdrop-keys';
 import { describeError } from '@/lib/errors';
 import { FT_STORAGE_DEPOSIT, GAS, txHashOf } from '@/lib/near';
+import { yoctoToNear } from 'near-api-js';
 
 // ponytail: native <dialog> — modal, focus trap and Esc come free
 function Modal({
@@ -41,9 +42,72 @@ function Modal({
   );
 }
 
+/** A token registration that storage_unregister can remove, and the NEAR it returns. */
+export type Removable = { token: HeldToken; locked: bigint };
+
+/** Confirms a storage removal; any balance still held is spelled out because it gets burned. */
+export function RemoveTokensDialog({
+  tokens,
+  onConfirm,
+  onClose,
+}: {
+  tokens: Removable[];
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const burning = tokens.filter((t) => t.token.balance > 0n);
+  const refund = tokens.reduce((sum, t) => sum + t.locked, 0n);
+  return (
+    <Modal
+      title={tokens.length === 1 ? `Remove ${tokens[0].token.symbol}` : `Remove ${tokens.length} tokens`}
+      subtitle={`Recovers ${yoctoToNear(refund, 5)} Ⓝ of storage`}
+      onClose={onClose}
+    >
+      <ul className="remove-token-list">
+        {tokens.map(({ token, locked }) => (
+          <li key={token.contractId}>
+            <span className="remove-token-name">
+              {token.symbol}
+              {token.symbol !== token.contractId && <small>{token.contractId}</small>}
+            </span>
+            <span className={token.balance > 0n ? 'remove-token-burn' : undefined}>
+              {token.balance > 0n ? `Burns ${fromUnits(token.balance, token.decimals)}` : 'Empty'}
+            </span>
+            <span>+{yoctoToNear(locked, 5)} Ⓝ</span>
+          </li>
+        ))}
+      </ul>
+      {burning.length > 0 && (
+        <p className="hint error" role="alert">
+          <TriangleAlert aria-hidden />{' '}
+          {burning.length === 1 ? 'One token still holds' : `${burning.length} tokens still hold`} a balance. Removing
+          burns it for good — it cannot be recovered.
+        </p>
+      )}
+      <div className="confirm-actions">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-danger" onClick={onConfirm}>
+          <Trash2 aria-hidden />
+          {burning.length > 0 ? 'Burn and remove' : 'Remove'}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 export type SendTarget = { kind: 'ft'; token: HeldToken } | { kind: 'nft'; token: OwnedNft };
 
-export function SendDialog({ target, onClose, onSent }: { target: SendTarget; onClose: () => void; onSent: () => void }) {
+export function SendDialog({
+  target,
+  onClose,
+  onSent,
+}: {
+  target: SendTarget;
+  onClose: () => void;
+  onSent: () => void;
+}) {
   const { signedAccountId: owner, provider, viewFunction, signAndSendTransactions } = useNearWallet();
   const { network } = useNetwork();
   const form = useForm({ sendTo: '', sendAmount: '' });
@@ -175,11 +239,7 @@ export function DropDialog({
     });
 
   return (
-    <Modal
-      title={name}
-      subtitle={`Drop ${drop.drop_id} · ${open} of ${keys.length} unclaimed`}
-      onClose={onClose}
-    >
+    <Modal title={name} subtitle={`Drop ${drop.drop_id} · ${open} of ${keys.length} unclaimed`} onClose={onClose}>
       {keys.length === 0 ? (
         <p className="hint">This browser holds no links for this drop.</p>
       ) : (

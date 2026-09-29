@@ -93,6 +93,8 @@ function useClaimableDrop(publicKey: string | null) {
     queryKey: ['claim', network, publicKey],
     enabled: !!publicKey,
     retry: false,
+    // A claim deletes the key, so a refetch would only replace the preview with "not found".
+    staleTime: Infinity,
     queryFn: async (): Promise<Preview> => {
       if (contracts.linkdrop.provider === 'near-drop') {
         const dropId = (await viewFunction({
@@ -329,7 +331,7 @@ export default function ClaimPage() {
 
         {publicKey && drop.isLoading && <p className="hint" role="status">Reading the drop…</p>}
 
-        {publicKey && drop.isError && (
+        {publicKey && drop.isError && !drop.data && (
           <p className="hint error">
             No drop found for this link on {network}. It may already have been claimed
             {network === 'mainnet' ? ', or it belongs to testnet — switch networks above.' : '.'}

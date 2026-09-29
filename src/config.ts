@@ -20,6 +20,10 @@ export const NetworkConfig: Record<
   {
     fastNearUrl: string;
     nearBlocksApiUrl: string;
+    /** Exposes get_whitelisted_tokens — what this app calls a verified token. */
+    verifiedTokens: string;
+    /** SocialDB — where NEAR profiles (name, avatar…) live. */
+    socialDb: string;
     liquidPools: LiquidPool[];
     explorerUrl: string;
     explorerBase: string;
@@ -28,6 +32,8 @@ export const NetworkConfig: Record<
   mainnet: {
     fastNearUrl: 'https://api.fastnear.com',
     nearBlocksApiUrl: 'https://api.nearblocks.io',
+    verifiedTokens: 'v2.ref-finance.near',
+    socialDb: 'social.near',
     explorerUrl: 'https://nearblocks.io/validators',
     explorerBase: 'https://nearblocks.io',
     liquidPools: [
@@ -46,6 +52,8 @@ export const NetworkConfig: Record<
   testnet: {
     fastNearUrl: 'https://test.api.fastnear.com',
     nearBlocksApiUrl: 'https://api-testnet.nearblocks.io',
+    verifiedTokens: 'ref-finance-101.testnet',
+    socialDb: 'v1.social08.testnet',
     explorerUrl: 'https://testnet.nearblocks.io/validators',
     explorerBase: 'https://testnet.nearblocks.io',
     liquidPools: [],

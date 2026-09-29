@@ -1,6 +1,20 @@
 'use client';
 
-import { useState } from 'react';
+import { ChangeEvent, KeyboardEvent, useState } from 'react';
+
+/**
+ * Props for a number <input> that only ever holds a non-negative decimal.
+ * `min` alone only affects the spinner; typing or pasting "-5" or "1e3" still works.
+ */
+export const nonNegative = (onChange: (value: string) => void) => ({
+  min: '0',
+  onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+    if (['-', '+', 'e', 'E'].includes(event.key)) event.preventDefault();
+  },
+  onChange: (event: ChangeEvent<HTMLInputElement>) => {
+    if (/^\d*\.?\d*$/.test(event.target.value)) onChange(event.target.value);
+  },
+});
 
 type Errors<F> = Partial<Record<keyof F, string>>;
 
@@ -82,7 +96,17 @@ export function Field({
       {type === 'textarea' ? (
         <textarea {...input} rows={4} onChange={(event) => onChange(event.target.value)} />
       ) : (
-        <input {...input} type={type} min={min} max={max} onChange={(event) => onChange(event.target.value)} />
+        <input
+          {...input}
+          type={type}
+          max={max}
+          {...(type === 'number'
+            ? { ...nonNegative(onChange), min: min ?? '0' }
+            : {
+                min,
+                onChange: (event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value),
+              })}
+        />
       )}
       <FieldMessage id={id} error={error} hint={hint} />
     </label>

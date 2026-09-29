@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNearWallet } from 'near-connect-hooks';
 import { KeyPair, yoctoToNear } from 'near-api-js';
@@ -13,12 +13,11 @@ import {
   fromUnits,
   KEYPOM_FEE_PER_LINK,
   KEYPOM_NFT_DEPOSIT_PER_USE,
-  NEAR_DROP_COST_PER_KEY,
   linkdropDeposit,
   toUnits,
 } from '@/lib/actions/contracts';
 import { claimUrl, saveDropKeys, saveDropName } from '@/lib/actions/linkdrop-keys';
-import { FT_STORAGE_DEPOSIT, GAS, GAS_300 } from '@/lib/near';
+import { FT_STORAGE_DEPOSIT, GAS, GAS_300, isAmount } from '@/lib/near';
 import { Field, useForm } from './form-fields';
 import { WizardShell } from './wizard-shell';
 
@@ -49,10 +48,11 @@ function planDrop(token: HeldToken, nft: OwnedNft | undefined, amount: string, q
       nearDeposit: KEYPOM_FEE_PER_LINK + KEYPOM_NFT_DEPOSIT_PER_USE,
       tokenTotal: 0n,
     };
-  const links = Number(quantity) || 0;
-  if (links < 1) return null;
+  // Runs on every render: "1.5" links or "1e3" tokens must not reach BigInt/toUnits.
+  const links = Number(quantity);
+  if (!Number.isInteger(links) || links < 1) return null;
   const isNear = token.contractId === 'near';
-  const perLink = amount ? toUnits(amount, token.decimals) : 0n;
+  const perLink = isAmount(amount, token.decimals) ? toUnits(amount, token.decimals) : 0n;
   return {
     asset: isNear ? 'near' : 'ft',
     links,
@@ -61,6 +61,12 @@ function planDrop(token: HeldToken, nft: OwnedNft | undefined, amount: string, q
     tokenTotal: isNear ? 0n : perLink * BigInt(links),
   };
 }
+
+const newKeys = (count: number) =>
+  Array.from({ length: count }, () => {
+    const pair = KeyPair.fromRandom('ed25519');
+    return { private: pair.toString(), public: pair.getPublicKey().toString() };
+  });
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? '' : 's'}`;
 const nftName = (nft: OwnedNft) => nft.metadata?.title || nft.token_id;
@@ -74,6 +80,8 @@ export function LinkdropAction() {
   const queryClient = useQueryClient();
   const contracts = ActionContracts[network];
   const usesNearDrop = contracts.linkdrop.provider === 'near-drop';
+  // near-drop quotes its exact deposit at review; submit reuses the quoted keys.
+  const quoted = useRef<{ keys: { private: string; public: string }[]; deposit: bigint } | null>(null);
 
   const holdings = useHoldings(owner);
   const ownedNfts = useOwnedNfts(owner);
@@ -104,25 +112,15 @@ export function LinkdropAction() {
 
   /** One cost string for the form, the review sheet and the receipt. */
   const near = (amount: bigint) => `${yoctoToNear(amount, 4)} Ⓝ`;
-  const serviceFee = plan
-    ? near(
-        usesNearDrop
-          ? NEAR_DROP_COST_PER_KEY * BigInt(plan.links)
-          : linkdropDeposit(plan.links, 0n, true)
-      )
-    : '';
-  const nearDeposit = !plan
-    ? 0n
-    : usesNearDrop
-      ? NEAR_DROP_COST_PER_KEY * BigInt(plan.links) + (plan.asset === 'near' ? plan.perLink * BigInt(plan.links) : 0n)
-      : plan.nearDeposit;
-  const cost = !plan
-    ? ''
-    : plan.asset === 'nft'
+  const payout = plan?.asset === 'near' ? plan.perLink * BigInt(plan.links) : 0n;
+  const costOf = (plan: Plan, nearDeposit: bigint) =>
+    plan.asset === 'nft'
       ? `1 NFT + ${near(nearDeposit)}`
       : plan.asset === 'near'
         ? near(nearDeposit)
         : `${fromUnits(plan.tokenTotal, token.decimals)} ${token.symbol} + ${near(nearDeposit)}`;
+  const serviceFee = plan && !usesNearDrop ? near(linkdropDeposit(plan.links, 0n, true)) : '';
+  const cost = plan && !usesNearDrop ? costOf(plan, plan.nearDeposit) : '';
 
   const review = async () => {
     const found: Partial<typeof initial> = {};
@@ -132,18 +130,32 @@ export function LinkdropAction() {
       const links = Number(fields.quantity);
       if (!/^\d+$/.test(fields.quantity) || links < 1 || links > MAX_LINKS)
         found.quantity = `A whole number from 1 to ${MAX_LINKS}.`;
-      if (!fields.amount || Number(fields.amount) <= 0) found.amount = 'Must be greater than zero.';
+      if (!isAmount(fields.amount, token.decimals) || toUnits(fields.amount, token.decimals) === 0n)
+        found.amount = `A positive amount with at most ${token.decimals} decimals.`;
       else if (token.balance > 0n && toUnits(fields.amount, token.decimals) * BigInt(Math.max(links, 1)) > token.balance)
         found.amount = `You hold ${fromUnits(token.balance, token.decimals)} ${token.symbol}.`;
     }
     if (!form.check(found) || !plan) return null;
     const createMethod = usesNearDrop
-      ? plan.asset === 'near'
-        ? 'create_near_drop'
-        : plan.asset === 'ft'
-          ? 'create_ft_drop'
-          : 'create_nft_drop'
+      ? `create_${plan.asset}_drop`
       : contracts.linkdrop.createMethod;
+
+    let fee = serviceFee;
+    let total = cost;
+    if (usesNearDrop) {
+      const keys = newKeys(plan.links);
+      // get_<asset>_drop_cost runs the same formula create_<asset>_drop charges.
+      const deposit = BigInt(
+        (await viewFunction({
+          contractId: contracts.linkdrop.contractId,
+          method: `get_${plan.asset}_drop_cost`,
+          args: { funder: owner, ...nearDropArgs(plan, keys) },
+        })) as string
+      );
+      quoted.current = { keys, deposit };
+      fee = near(deposit - payout);
+      total = costOf(plan, deposit);
+    }
 
     return {
       summary: nft
@@ -158,10 +170,10 @@ export function LinkdropAction() {
         { label: 'Per link', value: nft ? 'One NFT' : `${fields.amount} ${token.symbol}` },
         { label: 'Links', value: String(plan.links) },
       ],
-      send: cost,
+      send: total,
       receive: plural(plan.links, 'claim link'),
-      fee: `${serviceFee} contract funding`,
-      total: cost,
+      fee: `${fee} contract funding`,
+      total,
       notices: [
         'Claim links are stored in this browser only. Clearing site data destroys any unclaimed link permanently — download them after funding.',
         ...(nft
@@ -180,8 +192,8 @@ export function LinkdropAction() {
     if (!plan) throw new Error('Nothing to fund.');
     let dropId = Date.now().toString();
     let stored = false;
-    const pairs = Array.from({ length: plan.links }, () => KeyPair.fromRandom('ed25519'));
-    const keys = pairs.map((pair) => ({ private: pair.toString(), public: pair.getPublicKey().toString() }));
+    if (usesNearDrop && !quoted.current) throw new Error('Review the drop again to get a fresh quote.');
+    const keys = quoted.current?.keys ?? newKeys(plan.links);
 
     const call = (receiverId: string, methodName: string, args: object, deposit: bigint) => ({
       receiverId,
@@ -195,22 +207,12 @@ export function LinkdropAction() {
     });
 
     if (usesNearDrop) {
-      const methodName = plan.asset === 'near'
-        ? 'create_near_drop'
-        : plan.asset === 'ft'
-          ? 'create_ft_drop'
-          : 'create_nft_drop';
-      const createArgs = plan.asset === 'near'
-        ? { public_keys: keys.map((key) => key.public), amount_per_drop: plan.perLink.toString() }
-        : plan.asset === 'ft'
-          ? {
-              public_keys: keys.map((key) => key.public),
-              ft_contract: token.contractId,
-              amount_per_drop: plan.perLink.toString(),
-            }
-          : { public_key: keys[0].public, nft_contract: contracts.nft.contractId };
+      const { deposit } = quoted.current!;
+      quoted.current = null;
       const [outcome] = await signAndSendTransactions({
-        transactions: [call(contracts.linkdrop.contractId, methodName, createArgs, nearDeposit)],
+        transactions: [
+          call(contracts.linkdrop.contractId, `create_${plan.asset}_drop`, nearDropArgs(plan, keys), deposit),
+        ],
       });
       const encoded = (outcome.status as { SuccessValue?: string }).SuccessValue;
       if (!encoded) throw new Error('The contract did not return a drop ID.');
@@ -314,6 +316,18 @@ export function LinkdropAction() {
     };
   };
 
+  /** Shared by create_<asset>_drop and get_<asset>_drop_cost (which also takes `funder`). */
+  const nearDropArgs = (plan: Plan, keys: { public: string }[]) =>
+    plan.asset === 'near'
+      ? { public_keys: keys.map((key) => key.public), amount_per_drop: plan.perLink.toString() }
+      : plan.asset === 'ft'
+        ? {
+            public_keys: keys.map((key) => key.public),
+            ft_contract: token.contractId,
+            amount_per_drop: plan.perLink.toString(),
+          }
+        : { public_key: keys[0].public, nft_contract: contracts.nft.contractId };
+
   return (
     <WizardShell
       kind="linkdrop"
@@ -367,7 +381,13 @@ export function LinkdropAction() {
       {plan && (nft || fields.amount) && (
         <p className="wizard-total">
           {plural(plan.links, 'link')} × {nft ? nftName(nft) : `${fields.amount} ${token.symbol}`} +{' '}
-          {serviceFee} contract funding = <strong>{cost}</strong>
+          {usesNearDrop ? (
+            'contract funding, quoted by the contract at review'
+          ) : (
+            <>
+              {serviceFee} contract funding = <strong>{cost}</strong>
+            </>
+          )}
         </p>
       )}
     </WizardShell>

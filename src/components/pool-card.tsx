@@ -8,7 +8,8 @@ import { StakingAction, useStakingAction } from '@/hooks/use-staking';
 import { ReviewSheet } from '@/components/review-sheet';
 import { ActivityEntry, ResultSheet, useActivity } from '@/components/result-sheet';
 import { describeError } from '@/lib/errors';
-import { formatNear, toInputAmount, txHashOf } from '@/lib/near';
+import { nonNegative } from '@/components/actions/form-fields';
+import { formatNear, isAmount, toInputAmount, txHashOf } from '@/lib/near';
 import { apyLabel, GAS_RESERVE, minFastUnstake, PoolAccount } from '@/lib/staking';
 
 type Mode = 'stake' | 'unstake' | 'fast' | 'withdraw';
@@ -52,10 +53,9 @@ function AmountInput({
     <div className={`amount${overMax ? ' over' : ''}`}>
       <input
         type="number"
-        min="0"
         placeholder="0.0"
         value={amount}
-        onChange={(event) => setAmount(event.target.value)}
+        {...nonNegative(setAmount)}
         aria-label={ariaLabel}
       />
       <button className="max" disabled={busy || disabled} onClick={() => setAmount(maxAmount)}>
@@ -204,8 +204,9 @@ export function PoolCard({
   const availYocto =
     mode === 'stake' ? (walletYocto > GAS_RESERVE ? walletYocto - GAS_RESERVE : 0n) : stakedYocto;
   const maxAmount = toInputAmount(availYocto);
-  const overMax = amount !== '' && Number(amount) > Number(maxAmount);
-  const validAmount = amount !== '' && Number(amount) > 0;
+  // Compared in yocto: Number() rounds, and a near-max amount used to read as the max.
+  const validAmount = isAmount(amount, 24) && BigInt(toYocto(amount)) > 0n;
+  const overMax = validAmount && BigInt(toYocto(amount)) > availYocto;
 
   const liquidPool = NetworkConfig[network].liquidPools.find((pool) => pool.id === poolId);
   const fastExit = liquidPool?.fastExit;
@@ -218,7 +219,7 @@ export function PoolCard({
 
   // Typing the exact maximum used to silently become unstake_all while the success
   // message still named the typed amount. Now it is a deliberate, labelled choice.
-  const isFullExit = mode === 'unstake' && validAmount && !overMax && Number(amount) === Number(maxAmount);
+  const isFullExit = mode === 'unstake' && validAmount && BigInt(toYocto(amount)) === availYocto;
 
   const switchMode = (next: Mode) => {
     setMode(next);

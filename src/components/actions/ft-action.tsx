@@ -30,11 +30,14 @@ export function FtAction() {
   const review = async () => {
     const found: Partial<typeof initial> = {};
     if (!fields.name.trim()) found.name = 'Required.';
-    if (!/^[A-Za-z][A-Za-z0-9-]{1,11}$/.test(fields.symbol))
-      found.symbol = '2–12 characters, starting with a letter.';
+    // It becomes an account name: no leading, trailing or doubled hyphen.
+    if (!/^[A-Za-z](-?[A-Za-z0-9]){1,11}$/.test(fields.symbol) || fields.symbol.length > 12)
+      found.symbol = '2–12 letters, digits or single hyphens, starting with a letter.';
     if (!/^\d+$/.test(fields.decimals) || Number(fields.decimals) > 24)
       found.decimals = 'A whole number from 0 to 24.';
     if (!/^[1-9]\d*$/.test(fields.supply)) found.supply = 'A positive whole number.';
+    else if (!found.decimals && ftTotalSupply(fields.supply, Number(fields.decimals)) >= 2n ** 128n)
+      found.supply = 'Too large: supply × 10^decimals must fit in a u128.';
     if (!fields.icon) found.icon = 'An icon is required by the factory.';
     if (!form.check(found)) return null;
 

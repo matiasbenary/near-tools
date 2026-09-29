@@ -106,13 +106,6 @@ export const KEYPOM_FEE_PER_LINK = 426n * 10n ** 20n; // 0.0426 Ⓝ
  */
 export const KEYPOM_NFT_DEPOSIT_PER_USE = 284n * 10n ** 19n; // 0.00284 Ⓝ
 
-/**
- * The deployed near-drop contract currently requires 0.11 N per access key.
- * It refunds any excess deposit, so this intentionally follows the deployed
- * contract rather than the lower 0.101 N estimate in the local source tree.
- */
-export const NEAR_DROP_COST_PER_KEY = 11n * 10n ** 22n; // 0.11 Ⓝ
-
 export function linkdropDeposit(
   links: number,
   amountPerLinkYocto: bigint,

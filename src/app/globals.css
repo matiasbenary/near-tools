@@ -266,6 +266,14 @@ a {
   text-overflow: ellipsis;
 }
 
+.wallet-button .avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+}
+
 /* ---- action wizard ---- */
 .actions-page {
   min-height: calc(100dvh - 60px);
@@ -1923,12 +1931,16 @@ a {
   display: flex;
   list-style: none;
   justify-content: space-between;
-  align-items: baseline;
+  align-items: center;
   gap: 16px;
   cursor: pointer;
   font-weight: 600;
   font-size: 0.95rem;
   letter-spacing: -0.01em;
+}
+
+.holdings-summary .meta {
+  margin: 0;
 }
 
 .holdings-summary::-webkit-details-marker {
@@ -1998,26 +2010,56 @@ a {
   padding: 10px 0;
   border-bottom: 1px solid var(--line);
   overflow-wrap: anywhere;
-  vertical-align: top;
+  vertical-align: middle;
+}
+
+.holdings-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.holdings-table tbody tr:hover,
+.holdings-table tbody tr.is-selected {
+  background: var(--surface-2);
+}
+
+/* Inset the row edges so the hover highlight doesn't touch the text. */
+.holdings-table :is(th, td):first-child {
+  padding-left: 8px;
+}
+
+.holdings-table :is(th, td):last-child {
+  padding-right: 8px;
+}
+
+.holdings-table input[type='checkbox'] {
+  vertical-align: middle;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .holdings-table tr:last-child td {
   border-bottom: none;
-  padding-bottom: 0;
 }
 
 /* ponytail: no flex here — display:flex on a td drops it out of the row,
    so its border-bottom stops misaligning with the taller cells. */
 .holdings-name {
   overflow-wrap: anywhere;
+  font-family: var(--sans);
+  font-weight: 500;
 }
 
 .holdings-sub {
   color: var(--muted);
+  max-width: 32ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .holdings-value,
-.holdings-table th:nth-child(3),
+/* Balance is always second to last, with or without the FT checkbox column. */
+.holdings-table th:nth-last-child(2),
 .holdings-table th:last-child {
   text-align: right;
 }
@@ -2028,6 +2070,7 @@ a {
 }
 
 .holdings-icon {
+  display: inline-block;
   vertical-align: middle;
   margin-right: 10px;
   width: 22px;
@@ -2035,6 +2078,139 @@ a {
   border-radius: 50%;
   object-fit: cover;
   background: var(--line);
+}
+
+.holdings-icon-fallback {
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.holdings-verified {
+  display: inline-flex;
+  margin-left: 8px;
+  vertical-align: middle;
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.holdings-verified.is-verified {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.holdings-verified svg,
+.hint-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.hint-icon {
+  vertical-align: -2px;
+}
+
+.hint-icon.verified {
+  color: var(--accent);
+}
+
+.holdings-bulk {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  font-size: 0.85rem;
+}
+
+.holdings-bulk-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.holdings-bulk .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* Icon-only row actions: fixed square so every button lines up. */
+.holdings-action .holdings-icon-btn {
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  vertical-align: middle;
+}
+
+/* Empty slot keeps the icons in fixed columns when a row lacks one action. */
+.holdings-icon-slot {
+  display: inline-block;
+  width: 30px;
+  vertical-align: middle;
+}
+
+.holdings-action .holdings-icon-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.holdings-remove:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: rgba(240, 97, 109, 0.1);
+  color: var(--danger);
+}
+
+.holdings-remove:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: rgba(240, 97, 109, 0.1);
+  color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .holdings-table .holdings-sub {
+    display: none;
+  }
+}
+
+/* --- remove tokens confirmation --- */
+
+.remove-token-list {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 18px;
+  padding: 0;
+  list-style: none;
+  max-height: 50vh;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.remove-token-list li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 16px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.remove-token-name {
+  overflow-wrap: anywhere;
+}
+
+.remove-token-name small {
+  display: block;
+  color: var(--muted);
+}
+
+.remove-token-burn {
+  color: var(--danger);
 }
 
 /* --- claim page + drop links --- */
@@ -2259,6 +2435,26 @@ a {
 .holdings-action .btn {
   padding: 4px 10px;
   font-size: 12px;
+}
+
+.holdings-table .holdings-check {
+  width: 1%;
+  padding-right: 0;
+}
+
+.holdings-table .holdings-check + :is(th, td) {
+  padding-left: 12px;
+}
+
+.holdings-action > * + * {
+  margin-left: 6px;
+}
+
+.holdings-name .status-pill {
+  display: inline-block;
+  min-width: 0;
+  margin-left: 8px;
+  vertical-align: middle;
 }
 
 .holding-dialog {

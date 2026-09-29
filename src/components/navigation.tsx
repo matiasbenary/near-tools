@@ -7,6 +7,7 @@ import { usePathname } from 'next/navigation';
 import { useNearWallet } from 'near-connect-hooks';
 import { CircleUserRound, LogOut } from 'lucide-react';
 import { useNetwork } from '@/components/app-providers';
+import { useAvatar } from '@/hooks/use-avatar';
 import { networkBlockReasons } from '@/lib/network-guards';
 
 import NearLogo from '../../public/near-logo.svg';
@@ -15,6 +16,9 @@ export const Navigation = () => {
   const { signedAccountId, loading, signIn, signOut } = useNearWallet();
   const { network, setNetwork } = useNetwork();
   const pathname = usePathname();
+  const { data: avatar } = useAvatar(signedAccountId ?? '');
+  // ponytail: remember the URL that failed; a new avatar URL retries on its own
+  const [brokenAvatar, setBrokenAvatar] = useState<string | null>(null);
   // ponytail: native <dialog> — modal, focus trap and Esc come free
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [pending, setPending] = useState<{ next: typeof network; reasons: string[] } | null>(null);
@@ -81,7 +85,12 @@ export const Navigation = () => {
               'Loading…'
             ) : signedAccountId ? (
               <>
-                <CircleUserRound size={16} aria-hidden="true" />
+                {avatar && avatar !== brokenAvatar ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img className="avatar" src={avatar} alt="" onError={() => setBrokenAvatar(avatar)} />
+                ) : (
+                  <CircleUserRound size={16} aria-hidden="true" />
+                )}
                 <span className="wallet-name">{signedAccountId}</span>
                 <LogOut size={14} aria-label="Logout" />
               </>

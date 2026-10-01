@@ -52,9 +52,9 @@ const copy: Record<Kind, { label: string; title: ReactNode; lead: string; steps:
     ],
   },
   keys: {
-    label: 'Access keys',
-    title: <>Review connected<br /><em>app keys</em></>,
-    lead: 'See every function-call key authorized on your account and revoke access you no longer use. Full-access keys are never shown or removed here.',
+    label: 'Account cleanup',
+    title: <>Clean up your<br /><em>account</em></>,
+    lead: 'Recover NEAR locked in storage deposits and revoke app keys you no longer use. Full-access keys are never shown or removed here.',
     steps: [
       connectStep,
       ['Review permissions', 'See which contract each key can call, its allowed methods and remaining allowance.'],

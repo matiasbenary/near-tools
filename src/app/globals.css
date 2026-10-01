@@ -2686,3 +2686,40 @@ a {
     transition: color 0.15s, border-color 0.15s, box-shadow 0.15s, background 0.15s;
   }
 }
+
+.storage-shell {
+  min-height: 0;
+  margin-bottom: 0;
+}
+
+.storage-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--line);
+}
+
+.storage-row:last-child {
+  border-bottom: 0;
+}
+
+.storage-row small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.storage-amount {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .storage-row {
+    grid-template-columns: 1fr auto;
+  }
+  .storage-row > span:last-child:not(:empty) {
+    grid-column: 1 / -1;
+  }
+}

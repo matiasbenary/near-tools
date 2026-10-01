@@ -6,7 +6,8 @@ import { useNearWallet } from 'near-connect-hooks';
 import { yoctoToNear } from 'near-api-js';
 import { ArrowDownToLine, BadgeCheck, Link, Send, ShieldAlert, Trash2 } from 'lucide-react';
 import { useNetwork } from '@/components/app-providers';
-import { DropDialog, Removable, RemoveTokensDialog, SendDialog, SendTarget } from '@/components/holding-dialogs';
+import { IPFS } from '@/hooks/use-avatar';
+import { ConfirmDialog, DropDialog, Removable, RemoveTokensDialog, SendDialog, SendTarget } from '@/components/holding-dialogs';
 import {
   FtStorage,
   HeldToken,
@@ -58,9 +59,10 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
     tokens: Removable[];
     label: string;
   } | null>(null);
+  const [asking, setAsking] = useState<{ title: string; text: string; go: () => void } | null>(null);
 
   const ft = useHoldings(kind === 'ft' ? accountId : '');
-  const storage = useFtStorage(kind === 'ft' ? accountId : '');
+  const storage = useFtStorage(kind === 'ft' ? accountId : '', ft.data);
   const nft = useOwnedNfts(kind === 'nft' ? accountId : '');
 
   const drops = useDrops(kind === 'linkdrop' ? accountId : '');
@@ -107,7 +109,10 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
         'Every link that has not been claimed stops working. The NEAR goes back to your Keypom balance, which you can then withdraw.',
       unclaimed > 0 && `${unclaimed} link(s) stored in this browser are still unclaimed and will be lost for good.`,
     ].filter(Boolean);
-    if (!window.confirm(`Delete ${what}? ${warnings.join(' ')}`)) return;
+    setAsking({ title: `Delete ${what}?`, text: warnings.join(' ') || 'It is removed from this browser.', go: () => removeDrops(local, keypom, label) });
+  };
+
+  const removeDrops = (local: KeypomDrop[], keypom: KeypomDrop[], label: string) => {
     const call = (method: string, dropId: string) => ({
       receiverId: contracts.linkdrop.contractId,
       signerId: accountId,
@@ -127,7 +132,7 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
         await signAndSendTransactions({
           transactions: keypom.flatMap((drop) => [
             // Assets first — Keypom refuses to delete a drop that still holds them.
-            ...(drop.ft || drop.nft ? [call('refund_assets', drop.drop_id)] : []),
+            ...((drop.ft || drop.nft) && drop.registered_uses ? [call('refund_assets', drop.drop_id)] : []),
             // Deletes up to 100 keys per call, so a big drop needs more than one.
             call('delete_keys', drop.drop_id),
           ]),
@@ -404,6 +409,18 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
           }}
         />
       )}
+      {asking && (
+        <ConfirmDialog
+          title={asking.title}
+          text={asking.text}
+          confirmLabel="Delete"
+          onClose={() => setAsking(null)}
+          onConfirm={() => {
+            setAsking(null);
+            asking.go();
+          }}
+        />
+      )}
       {sending && (
         <SendDialog
           target={sending}
@@ -476,7 +493,8 @@ const ftRows = (tokens?: HeldToken[], storage?: FtStorage): Row[] => {
       key: token.contractId,
       label: token.symbol,
       sub: token.contractId,
-      value: groupDigits(fromUnits(token.balance, token.decimals)),
+      // Dust rounds to 0 at 4 places; say so, or it looks removable without burning anything.
+      value: token.balance > 0n && fromUnits(token.balance, token.decimals) === '0' ? '< 0.0001' : groupDigits(fromUnits(token.balance, token.decimals)),
       icon: token.icon,
       send: { kind: 'ft', token },
       verified,
@@ -491,13 +509,17 @@ const groupDigits = (value: string) => {
   return BigInt(int).toLocaleString('en-US') + (frac ? `.${frac}` : '');
 };
 
+// ponytail: a bare CID is relative to the collection's base_uri; assume IPFS instead of fetching nft_metadata
+const nftMedia = (media?: string) =>
+  media && !/^(https?:|data:|ipfs:)/.test(media) ? `${IPFS}/ipfs/${media}` : media;
+
 const nftRows = (tokens?: OwnedNft[]): Row[] =>
   (tokens ?? []).map((token) => ({
     key: token.token_id,
     label: token.metadata?.title || token.token_id,
     sub: token.token_id,
     value: token.owner_id ?? '',
-    icon: token.metadata?.media,
+    icon: nftMedia(token.metadata?.media),
     send: { kind: 'nft', token },
   }));
 

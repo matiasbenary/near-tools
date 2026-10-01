@@ -42,6 +42,36 @@ function Modal({
   );
 }
 
+/** Replaces window.confirm for destructive actions. */
+export function ConfirmDialog({
+  title,
+  text,
+  confirmLabel,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  text: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <Modal title={title} onClose={onClose}>
+      <p className="hint">{text}</p>
+      <div className="confirm-actions">
+        <button type="button" className="btn btn-ghost" onClick={onClose}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-danger" onClick={onConfirm}>
+          <Trash2 aria-hidden />
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 /** A token registration that storage_unregister can remove, and the NEAR it returns. */
 export type Removable = { token: HeldToken; locked: bigint };
 

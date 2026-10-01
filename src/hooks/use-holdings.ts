@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNearWallet } from 'near-connect-hooks';
 import { JsonRpcProvider } from 'near-api-js';
 import { useNetwork } from '@/components/app-providers';
@@ -71,7 +71,22 @@ export function useHoldings(accountId: string) {
         ];
       });
 
-      return [nearBalance, ...tokens];
+      // Legacy tokens (near-sdk 3.x) emit no events, so NearBlocks never sees a burn or an
+      // unregister and keeps showing the old balance. Confirm each one on-chain.
+      // ponytail: one view per token, 10 at a time; fine for tens of tokens
+      const directRpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
+      const confirmed: HeldToken[] = [];
+      for (let i = 0; i < tokens.length; i += 10)
+        await Promise.all(
+          tokens.slice(i, i + 10).map(async (token) => {
+            const onChain = await directRpc
+              .callFunction({ contractId: token.contractId, method: 'ft_balance_of', args: { account_id: accountId } })
+              .then((b) => BigInt(b as string), () => token.balance);
+            if (onChain > 0n) confirmed.push({ ...token, balance: onChain });
+          })
+        );
+
+      return [nearBalance, ...tokens.flatMap((t) => confirmed.filter((c) => c.contractId === t.contractId))];
     },
   });
 }
@@ -86,30 +101,47 @@ export type FtStorage = {
 };
 
 /** Which tokens are verified, and which registrations can be removed to get their storage NEAR back. */
-export function useFtStorage(accountId: string) {
+export function useFtStorage(accountId: string, held: HeldToken[] = []) {
   const { viewFunction } = useNearWallet();
   const { network } = useNetwork();
+  const queryClient = useQueryClient();
+  // NearBlocks' inventory can hold tokens FastNEAR's list misses; check their storage too.
+  const heldIds = held.map((t) => t.contractId).filter((id) => id !== 'near');
 
   return useQuery({
-    queryKey: ['ft-storage', network, accountId],
+    queryKey: ['ft-storage', network, accountId, heldIds],
     enabled: accountId.length > 0,
     staleTime: 60_000,
     queryFn: async (): Promise<FtStorage> => {
+      // ponytail: sub-results cached in the QueryClient, so a refetch (focus, held list arriving)
+      // only hits the network for what expired. In-memory only; persist-client if reloads hurt.
       const [list, whitelist] = await Promise.all([
-        // FastNEAR lists every token the account touched, zero balances included.
-        fetch(`${NetworkConfig[network].fastNearUrl}/v1/account/${accountId}/ft`).then((response) => {
-          if (!response.ok) throw new Error(`FastNEAR token list failed (${response.status})`);
-          return response.json() as Promise<{
-            tokens?: { contract_id: string; balance: string }[];
-          }>;
+        queryClient.fetchQuery({
+          queryKey: ['ft-storage', network, accountId, 'list'],
+          staleTime: 5 * 60_000,
+          // FastNEAR lists every token the account touched, zero balances included.
+          queryFn: async () => {
+            const response = await fetch(`${NetworkConfig[network].fastNearUrl}/v1/account/${accountId}/ft`);
+            if (!response.ok) throw new Error(`FastNEAR token list failed (${response.status})`);
+            return response.json() as Promise<{ tokens?: { contract_id: string; balance: string }[] }>;
+          },
         }),
-        viewFunction({
-          contractId: NetworkConfig[network].verifiedTokens,
-          method: 'get_whitelisted_tokens',
-        }) as Promise<string[]>,
+        queryClient.fetchQuery({
+          queryKey: ['ft-whitelist', network],
+          staleTime: 60 * 60_000,
+          queryFn: () =>
+            viewFunction({
+              contractId: NetworkConfig[network].verifiedTokens,
+              method: 'get_whitelisted_tokens',
+            }) as Promise<string[]>,
+        }),
       ]);
       const verified = new Set(whitelist);
-      const candidates = (list.tokens ?? []).filter((t) => t.balance === '0' || !verified.has(t.contract_id));
+      const listed = list.tokens ?? [];
+      const missing = heldIds
+        .filter((id) => !listed.some((t) => t.contract_id === id))
+        .map((contract_id) => ({ contract_id, balance: '' }));
+      const candidates = [...listed, ...missing].filter((t) => t.balance === '0' || !verified.has(t.contract_id));
 
       // Direct provider: a contract without NEP-145 panics, which the wallet's provider logs as an error.
       const directRpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
@@ -118,14 +150,12 @@ export function useFtStorage(accountId: string) {
       for (let i = 0; i < candidates.length; i += 10)
         await Promise.all(
           candidates.slice(i, i + 10).map(async (t) => {
-            const storage = (await directRpc
-              .callFunction({
-                contractId: t.contract_id,
-                method: 'storage_balance_of',
-                args: { account_id: accountId },
-              })
-              .catch(() => null)) as { total?: string } | null;
-            if (storage?.total) locked.set(t.contract_id, BigInt(storage.total));
+            const total = await queryClient.fetchQuery({
+              queryKey: ['ft-storage', network, accountId, 'of', t.contract_id],
+              staleTime: 5 * 60_000,
+              queryFn: () => lockedStorage(directRpc, t.contract_id, accountId),
+            });
+            if (total !== null) locked.set(t.contract_id, total);
           })
         );
 
@@ -171,6 +201,8 @@ export type KeypomDrop = {
   /** Present on token drops: those assets have to be refunded before deleting. */
   ft?: unknown;
   nft?: unknown;
+  /** Uses with an asset still deposited; refund_assets panics when it is 0. */
+  registered_uses?: number;
   /** Every link this browser holds; `claimed` once the key is gone from the contract. */
   keys?: (DropKey & { claimed: boolean })[];
 };
@@ -273,4 +305,18 @@ export function useKeypomBalance(accountId: string) {
       }).catch(() => '0')) ?? '0') as string;
     },
   });
+}
+
+/** NEAR locked in `contractId`'s storage for `accountId`, or null when there's nothing removable. */
+async function lockedStorage(rpc: JsonRpcProvider, contractId: string, accountId: string): Promise<bigint | null> {
+  const storage = (await rpc
+    .callFunction({ contractId, method: 'storage_balance_of', args: { account_id: accountId } })
+    .catch(() => null)) as { total?: string } | null;
+  if (!storage?.total) return null;
+  // Some NEP-145 tokens (e.g. cb.tkn.primitives.near) skip storage_unregister. A view call
+  // tells them apart: a real one panics asking for 1 yocto, a missing one is MethodNotFound.
+  const unregisterable = await rpc
+    .callFunction({ contractId, method: 'storage_unregister', args: {} })
+    .then(() => true, (error: unknown) => !String(error).includes('MethodNotFound'));
+  return unregisterable ? BigInt(storage.total) : null;
 }

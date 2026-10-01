@@ -54,7 +54,7 @@ export const Navigation = () => {
             { href: '/ft', label: 'FT' },
             { href: '/nft', label: 'NFT' },
             { href: '/linkdrop', label: 'Linkdrop' },
-            { href: '/keys', label: 'Keys' },
+            { href: '/cleanup', label: 'Cleanup' },
           ].map(({ href, label }) => (
             <Link key={href} href={href} className={pathname === href ? 'active' : ''}>
               {label}

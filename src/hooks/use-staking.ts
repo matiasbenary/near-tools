@@ -5,7 +5,7 @@ import { useNearWallet } from 'near-connect-hooks';
 import { NetworkConfig } from '@/config';
 import { useNetwork } from '@/components/app-providers';
 import { GAS } from '@/lib/near';
-import { Fee, getValidatorData, PoolAccount, Position, Validator } from '@/lib/staking';
+import { Fee, getValidatorData, PoolAccount, Position, Validator, withoutStakingDust } from '@/lib/staking';
 
 const keys = {
   validators: ['validators'] as const,
@@ -170,8 +170,8 @@ export function useStakingPositions(accountId: string, selectedPoolId: string) {
       if (!account) return null;
       return {
         id: pool.pool_id,
-        staked_balance: BigInt(account.staked_balance),
-        unstaked_balance: BigInt(account.unstaked_balance),
+        staked_balance: withoutStakingDust(BigInt(account.staked_balance)),
+        unstaked_balance: withoutStakingDust(BigInt(account.unstaked_balance)),
         can_withdraw: account.can_withdraw,
       };
     })

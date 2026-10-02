@@ -7,11 +7,8 @@ import type { NetworkId } from '@/config';
  * actions lives here, once, per network.
  *
  * Verified against free.rpc.fastnear.com and test.rpc.fastnear.com on 2026-09-21:
- *  - v2.keypom.near and v2.keypom.testnet share a code_hash — same interface.
  *  - nft.primitives.{near,testnet} differ in code_hash but expose the same NEP-171 surface.
- *  - The FT factories DIFFER: testnet takes get_required({args}), mainnet takes
- *    get_required_deposit({args, account_id}). That extra top-level field is the
- *    reason this indirection exists at all.
+ * FT factory quote calls are configured separately for each network.
  */
 
 export type ActionKind = 'ft' | 'nft' | 'linkdrop';
@@ -49,26 +46,24 @@ export const ActionContracts: Record<
     nft: { contractId: string; mintMethod: string };
     linkdrop: {
       contractId: string;
-      provider: 'keypom' | 'near-drop';
       createMethod: string;
     };
   }
 > = {
   mainnet: {
     ft: {
-      contractId: 'tkn.near',
-      accountFor: (symbol) => `${normalizeSymbol(symbol)}.tkn.near`,
+      contractId: 'token.primitives.near',
+      accountFor: (symbol) => `${normalizeSymbol(symbol)}.token.primitives.near`,
       quote: (args, accountId) => ({
-        contractId: 'tkn.near',
-        method: 'get_required_deposit',
+        contractId: 'token.primitives.near',
+        method: 'get_required',
         args: { args, account_id: accountId },
       }),
       createMethod: 'create_token',
     },
     nft: { contractId: 'nft.primitives.near', mintMethod: 'nft_mint' },
     linkdrop: {
-      contractId: 'v2.keypom.near',
-      provider: 'keypom',
+      contractId: 'linkdrop.primitives.near',
       createMethod: 'create_drop',
     },
   },
@@ -85,9 +80,8 @@ export const ActionContracts: Record<
     },
     nft: { contractId: 'nft.primitives.testnet', mintMethod: 'nft_mint' },
     linkdrop: {
-      contractId: 'maguila-near-drop.testnet',
-      provider: 'near-drop',
-      createMethod: 'create_near_drop',
+      contractId: 'linkdrop.primitives.testnet',
+      createMethod: 'create_drop',
     },
   },
 };
@@ -96,27 +90,6 @@ export const ActionContracts: Record<
 export const normalizeSymbol = (symbol: string) => symbol.trim().toLowerCase();
 
 export const ONE_NEAR = nearToYocto(1);
-
-/** Keypom charges a flat per-link fee on top of whatever each link pays out. */
-export const KEYPOM_FEE_PER_LINK = 426n * 10n ** 20n; // 0.0426 Ⓝ
-
-/**
- * An NFT link still has to pay for the claimer's account storage, so the drop
- * attaches a small NEAR amount per use on top of the token itself.
- */
-export const KEYPOM_NFT_DEPOSIT_PER_USE = 284n * 10n ** 19n; // 0.00284 Ⓝ
-
-export function linkdropDeposit(
-  links: number,
-  amountPerLinkYocto: bigint,
-  isFtDrop: boolean
-): bigint {
-  const count = BigInt(links);
-  // An FT drop moves the tokens in a second ft_transfer_call, so only the fee is attached here.
-  return isFtDrop
-    ? KEYPOM_FEE_PER_LINK * count
-    : (KEYPOM_FEE_PER_LINK + amountPerLinkYocto) * count;
-}
 
 /**
  * Storage cost of an nft_mint, estimated from the serialized args.

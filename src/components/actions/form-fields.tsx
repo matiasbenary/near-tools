@@ -133,13 +133,44 @@ const readAsDataUrl = (file: File) =>
     reader.readAsDataURL(file);
   });
 
-/** An image picked from disk, kept as a data URL. Rejects wrong types and sizes itself. */
+/** Fit the encoded icon within the on-chain budget, including base64 overhead. */
+async function shrinkIcon(file: File, maxBytes: number, maxDimension: number): Promise<string> {
+  const original = await readAsDataUrl(file);
+  if (original.length <= maxBytes) return original;
+
+  const image = new Image();
+  image.src = original;
+  await image.decode();
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not resize that image.');
+  const ratio = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight));
+  let width = Math.max(1, Math.round(image.naturalWidth * ratio));
+  let height = Math.max(1, Math.round(image.naturalHeight * ratio));
+  while (true) {
+    canvas.width = width;
+    canvas.height = height;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(image, 0, 0, width, height);
+    for (const quality of [0.85, 0.65, 0.45]) {
+      const compressed = canvas.toDataURL('image/webp', quality);
+      if (compressed.length <= maxBytes) return compressed;
+    }
+    if (Math.max(width, height) <= 16) break;
+    width = Math.max(1, Math.floor(width * 0.75));
+    height = Math.max(1, Math.floor(height * 0.75));
+  }
+  throw new Error('Could not shrink that image enough. Try a simpler icon.');
+}
+
+/** An image picked from disk, optionally compressed before storing its data URL. */
 export function ImageField({
   id,
   label,
   value,
   onChange,
   maxBytes,
+  resizeTo,
   hint,
   error,
 }: {
@@ -148,20 +179,30 @@ export function ImageField({
   value: string;
   onChange: (dataUrl: string) => void;
   maxBytes: number;
+  resizeTo?: number;
   hint: string;
   error?: string;
 }) {
   const [pickError, setPickError] = useState('');
+  const [processing, setProcessing] = useState(false);
 
   const pick = async (file: File | undefined) => {
     setPickError('');
     if (!file) return onChange('');
     if (!IMAGE_TYPES.includes(file.type)) return setPickError('Use a PNG, JPEG, GIF or SVG image.');
-    if (file.size > maxBytes)
+    if (!resizeTo && file.size > maxBytes)
       return setPickError(
         `That image is ${Math.round(file.size / 1024)} KB. The limit is ${Math.round(maxBytes / 1024)} KB.`
       );
-    onChange(await readAsDataUrl(file));
+    onChange('');
+    setProcessing(true);
+    try {
+      onChange(resizeTo ? await shrinkIcon(file, maxBytes, resizeTo) : await readAsDataUrl(file));
+    } catch {
+      setPickError('Could not process that image. Try a different or simpler icon.');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const shownError = pickError || error;
@@ -171,12 +212,13 @@ export function ImageField({
       <input
         id={id}
         type="file"
+        disabled={processing}
         accept={IMAGE_TYPES.join(',')}
         aria-invalid={shownError ? true : undefined}
         aria-describedby={shownError ? `${id}-error` : `${id}-hint`}
         onChange={(event) => pick(event.target.files?.[0])}
       />
-      <FieldMessage id={id} error={shownError} hint={hint} />
+      <FieldMessage id={id} error={shownError} hint={processing ? 'Optimizing image…' : hint} />
       {value && (
         <span className="image-preview">
           {/* eslint-disable-next-line @next/next/no-img-element */}

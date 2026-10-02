@@ -9,13 +9,12 @@ import { CircleUserRound, LogOut } from 'lucide-react';
 import { useNetwork } from '@/components/app-providers';
 import { useAvatar } from '@/hooks/use-avatar';
 import { networkBlockReasons } from '@/lib/network-guards';
-
-import NearLogo from '../../public/near-logo.svg';
+import { tools } from '@/lib/tools';
 
 export const Navigation = () => {
   const { signedAccountId, loading, signIn, signOut } = useNearWallet();
   const { network, setNetwork } = useNetwork();
-  const pathname = usePathname();
+  const pathname = usePathname().replace(/\/$/, '') || '/';
   const { data: avatar } = useAvatar(signedAccountId ?? '');
   // ponytail: remember the URL that failed; a new avatar URL retries on its own
   const [brokenAvatar, setBrokenAvatar] = useState<string | null>(null);
@@ -45,17 +44,10 @@ export const Navigation = () => {
     <nav className="nav">
       <div className="wrap nav-inner">
         <Link href="/" className="brand">
-          <Image priority src={NearLogo} alt="NEAR" width={26} height={26} />
-          <span className="brand-label">NEAR</span>
+          <span className="brand-label">Simplr Tools</span>
         </Link>
         <div className="nav-links" aria-label="Primary navigation">
-          {[
-            { href: '/', label: 'Stake' },
-            { href: '/ft', label: 'FT' },
-            { href: '/nft', label: 'NFT' },
-            { href: '/linkdrop', label: 'Linkdrop' },
-            { href: '/cleanup', label: 'Cleanup' },
-          ].map(({ href, label }) => (
+          {tools.filter((tool) => tool.kind !== 'faucet' || network === 'testnet').map(({ href, label }) => (
             <Link key={href} href={href} className={pathname === href ? 'active' : ''}>
               {label}
             </Link>

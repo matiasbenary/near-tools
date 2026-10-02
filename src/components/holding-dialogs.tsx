@@ -1,16 +1,11 @@
 'use client';
 
 import { ReactNode, useEffect, useRef, useState } from 'react';
-import { useNearWallet } from 'near-connect-hooks';
-import { Check, Copy, Send, Trash2, TriangleAlert, X } from 'lucide-react';
+import { Check, Copy, Trash2, TriangleAlert, X } from 'lucide-react';
+import { HeldToken, Linkdrop } from '@/hooks/use-holdings';
+import { fromUnits } from '@/lib/actions/contracts';
 import { useNetwork } from '@/components/app-providers';
-import { Field, useForm } from '@/components/actions/form-fields';
-import { HeldToken, KeypomDrop, OwnedNft } from '@/hooks/use-holdings';
-import { ActionContracts, fromUnits, toUnits } from '@/lib/actions/contracts';
 import { claimUrl } from '@/lib/actions/linkdrop-keys';
-import { describeError } from '@/lib/errors';
-import { FT_STORAGE_DEPOSIT, GAS, txHashOf } from '@/lib/near';
-import { yoctoToNear } from 'near-api-js';
 
 // ponytail: native <dialog> — modal, focus trap and Esc come free
 function Modal({
@@ -72,8 +67,8 @@ export function ConfirmDialog({
   );
 }
 
-/** A token registration that storage_unregister can remove, and the NEAR it returns. */
-export type Removable = { token: HeldToken; locked: bigint };
+/** A token selected for an attempted storage_unregister transaction. */
+export type Removable = { token: HeldToken };
 
 /** Confirms a storage removal; any balance still held is spelled out because it gets burned. */
 export function RemoveTokensDialog({
@@ -86,15 +81,13 @@ export function RemoveTokensDialog({
   onClose: () => void;
 }) {
   const burning = tokens.filter((t) => t.token.balance > 0n);
-  const refund = tokens.reduce((sum, t) => sum + t.locked, 0n);
   return (
     <Modal
       title={tokens.length === 1 ? `Remove ${tokens[0].token.symbol}` : `Remove ${tokens.length} tokens`}
-      subtitle={`Recovers ${yoctoToNear(refund, 5)} Ⓝ of storage`}
       onClose={onClose}
     >
       <ul className="remove-token-list">
-        {tokens.map(({ token, locked }) => (
+        {tokens.map(({ token }) => (
           <li key={token.contractId}>
             <span className="remove-token-name">
               {token.symbol}
@@ -103,7 +96,6 @@ export function RemoveTokensDialog({
             <span className={token.balance > 0n ? 'remove-token-burn' : undefined}>
               {token.balance > 0n ? `Burns ${fromUnits(token.balance, token.decimals)}` : 'Empty'}
             </span>
-            <span>+{yoctoToNear(locked, 5)} Ⓝ</span>
           </li>
         ))}
       </ul>
@@ -127,124 +119,6 @@ export function RemoveTokensDialog({
   );
 }
 
-export type SendTarget = { kind: 'ft'; token: HeldToken } | { kind: 'nft'; token: OwnedNft };
-
-export function SendDialog({
-  target,
-  onClose,
-  onSent,
-}: {
-  target: SendTarget;
-  onClose: () => void;
-  onSent: () => void;
-}) {
-  const { signedAccountId: owner, provider, viewFunction, signAndSendTransactions } = useNearWallet();
-  const { network } = useNetwork();
-  const form = useForm({ sendTo: '', sendAmount: '' });
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
-  const ft = target.kind === 'ft' ? target.token : null;
-  const nft = target.kind === 'nft' ? target.token : null;
-  const name = ft?.symbol ?? (nft?.metadata?.title || nft?.token_id);
-
-  const accountExists = (accountId: string) =>
-    // Implicit accounts are valid before they exist on chain.
-    /^[0-9a-f]{64}$/.test(accountId) ||
-    provider.viewAccount({ accountId, blockQuery: { finality: 'final' } }).then(
-      () => true,
-      () => false
-    );
-
-  const send = async () => {
-    const receiver = form.fields.sendTo.trim().toLowerCase();
-    const found: { sendTo?: string; sendAmount?: string } = {};
-    let amount = 0n;
-    if (!receiver) found.sendTo = 'Required.';
-    else if (receiver === owner) found.sendTo = 'That is your own account.';
-    if (ft) {
-      try {
-        amount = toUnits(form.fields.sendAmount, ft.decimals);
-      } catch {
-        amount = 0n;
-      }
-      if (amount <= 0n) found.sendAmount = 'A positive amount.';
-      else if (amount > ft.balance) found.sendAmount = `You hold ${fromUnits(ft.balance, ft.decimals)}.`;
-    }
-    if (!form.check(found)) return;
-
-    setBusy(true);
-    setNote(null);
-    try {
-      if (!(await accountExists(receiver))) {
-        form.check({ sendTo: `${receiver} does not exist on ${network}.` });
-        return;
-      }
-      const call = (methodName: string, args: object, deposit: bigint) => ({
-        type: 'FunctionCall' as const,
-        params: { methodName, args, gas: GAS.toString(), deposit: deposit.toString() },
-      });
-      const actions = [];
-      let contractId: string;
-      if (ft) {
-        contractId = ft.contractId;
-        const registered = await viewFunction({
-          contractId,
-          method: 'storage_balance_of',
-          args: { account_id: receiver },
-        }).catch(() => null);
-        if (!registered)
-          actions.push(call('storage_deposit', { account_id: receiver, registration_only: true }, FT_STORAGE_DEPOSIT));
-        actions.push(call('ft_transfer', { receiver_id: receiver, amount: amount.toString() }, 1n));
-      } else {
-        contractId = ActionContracts[network].nft.contractId;
-        actions.push(call('nft_transfer', { receiver_id: receiver, token_id: nft!.token_id }, 1n));
-      }
-      const [outcome] = await signAndSendTransactions({
-        transactions: [{ receiverId: contractId, actions }],
-      });
-      setNote({ ok: true, text: `Sent to ${receiver}. Tx ${txHashOf(outcome) ?? ''}` });
-      onSent();
-    } catch (error) {
-      setNote({ ok: false, text: describeError(error).message });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal title={`Send ${name}`} onClose={onClose}>
-      <div className="holding-dialog-form">
-        <Field {...form.bind('sendTo')} label="Receiver account" placeholder="alice.near" required />
-        {ft && (
-          <Field
-            {...form.bind('sendAmount')}
-            label={`Amount (${ft.symbol})`}
-            type="number"
-            hint={`Balance: ${fromUnits(ft.balance, ft.decimals)}`}
-            required
-          />
-        )}
-      </div>
-      {note && (
-        <p className={note.ok ? 'hint' : 'hint error'} role="status">
-          {note.text}
-        </p>
-      )}
-      <div className="confirm-actions">
-        <button type="button" className="btn btn-ghost" onClick={onClose}>
-          {note?.ok ? 'Close' : 'Cancel'}
-        </button>
-        {!note?.ok && (
-          <button type="button" className="btn" disabled={busy} onClick={send}>
-            <Send aria-hidden />
-            {busy ? 'Sending…' : 'Send'}
-          </button>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
 export function DropDialog({
   drop,
   name,
@@ -252,14 +126,15 @@ export function DropDialog({
   onDelete,
   onClose,
 }: {
-  drop: KeypomDrop;
+  drop: Linkdrop;
   name: string;
   busy: boolean;
   onDelete: () => void;
   onClose: () => void;
 }) {
   const [copied, setCopied] = useState(-1);
-  const keys = drop.keys ?? [];
+  const { network } = useNetwork();
+  const keys = drop.keys;
   const open = keys.filter((key) => !key.claimed).length;
 
   const copy = (link: string, index: number) =>
@@ -275,7 +150,7 @@ export function DropDialog({
       ) : (
         <ol className="drop-links">
           {keys.map((key, index) => {
-            const link = claimUrl(key.private);
+            const link = claimUrl(key.private, network);
             return (
               <li key={key.public} className={key.claimed ? 'claimed' : undefined}>
                 <span className="drop-link-index">#{index + 1}</span>
@@ -302,7 +177,7 @@ export function DropDialog({
       <div className="confirm-actions">
         <button type="button" className="btn btn-ghost btn-danger-ghost" disabled={busy} onClick={onDelete}>
           <Trash2 aria-hidden />
-          {busy ? 'Deleting…' : drop.locallyManaged ? 'Forget drop' : 'Delete & refund'}
+          {busy ? 'Deleting…' : drop.exists ? 'Delete & refund' : 'Forget drop'}
         </button>
         <button type="button" className="btn" onClick={onClose}>
           Close

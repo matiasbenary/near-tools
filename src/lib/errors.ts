@@ -22,6 +22,23 @@ export type DescribedError = {
   retryable: boolean;
 };
 
+/** An explanation written by the app, safe to show without exposing RPC text. */
+export class UserFacingError extends Error {
+  readonly kind: ErrorKind;
+  readonly retryable: boolean;
+
+  constructor(
+    message: string,
+    kind: ErrorKind = 'rejected',
+    retryable = false
+  ) {
+    super(message);
+    this.name = 'UserFacingError';
+    this.kind = kind;
+    this.retryable = retryable;
+  }
+}
+
 /** The untruncated text, for a "Details" disclosure. */
 export const rawError = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -54,7 +71,7 @@ const matchers: { kind: ErrorKind; test: RegExp; message: string; retryable: boo
   {
     kind: 'link-underfunded',
     test: /not ?enough ?allowance|not enough gas attached|exceeds the maximum/i,
-    message: 'This link cannot pay for its own claim. Ask whoever sent it to top it up.',
+    message: 'This link cannot pay for its own claim. Its claim key has insufficient gas allowance.',
     retryable: false,
   },
   {
@@ -73,6 +90,9 @@ const matchers: { kind: ErrorKind; test: RegExp; message: string; retryable: boo
 
 export function describeError(error: unknown): DescribedError {
   const detail = errMsg(error);
+  if (error instanceof UserFacingError) {
+    return { kind: error.kind, message: error.message, detail, retryable: error.retryable };
+  }
   const text = rawError(error);
   const hit = matchers.find((m) => m.test.test(text));
   return hit

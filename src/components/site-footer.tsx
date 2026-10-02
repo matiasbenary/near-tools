@@ -2,7 +2,7 @@ export function SiteFooter() {
   return (
     <footer className="footer">
       <div className="wrap footer-inner">
-        <span>NEAR STAKE © 2026</span>
+        <span>Simplr Tools © 2026</span>
         <a
           className="footer-repo"
           href="https://github.com/matiasbenary/near-stake"
@@ -11,7 +11,7 @@ export function SiteFooter() {
         >
           Source on GitHub
         </a>
-        <span>BUILT ON NEAR</span>
+        <span>BUILT FOR NEAR</span>
       </div>
     </footer>
   );

@@ -6,17 +6,11 @@ import { JsonRpcProvider } from 'near-api-js';
 import { useNetwork } from '@/components/app-providers';
 import { NetworkConfig, RpcUrls } from '@/config';
 import { ActionContracts } from '@/lib/actions/contracts';
+import { dropData, dropReady, type OnChainDrop } from '@/lib/actions/linkdrop';
 import { DropKey, loadDropKeys, loadDropName, loadStoredDropIds } from '@/lib/actions/linkdrop-keys';
 
-export type HeldToken = {
-  contractId: string;
-  symbol: string;
-  decimals: number;
-  /** Raw on-chain balance. */
-  balance: bigint;
-  /** Data-URL icon from ft_metadata, when the token ships one. */
-  icon?: string;
-};
+import { loadHoldings, saveHoldings, readTokenHoldings, limitTokenRequests, type HeldToken, type TokenMetadata } from '@/lib/holdings';
+export type { HeldToken } from '@/lib/holdings';
 
 /** NEAR itself is always first in the picker, so a drop needs no token at all. */
 export const nativeNear = (balance: bigint): HeldToken => ({
@@ -33,138 +27,67 @@ export const nativeNear = (balance: bigint): HeldToken => ({
 export function useHoldings(accountId: string) {
   const { getBalance } = useNearWallet();
   const { network } = useNetwork();
+  const queryClient = useQueryClient();
 
   return useQuery({
     queryKey: ['holdings', network, accountId],
+    initialData: () => loadHoldings(network, accountId),
+    initialDataUpdatedAt: 0,
     enabled: accountId.length > 0,
     staleTime: 60_000,
-    queryFn: async (): Promise<HeldToken[]> => {
+    queryFn: async ({ signal }): Promise<HeldToken[]> => {
       const nearBalance = nativeNear(BigInt(await getBalance(accountId)));
 
-      // ponytail: inventory ships balance + metadata in one call — no ft_metadata
-      // roundtrips, and no console noise from contracts that panic on NEP-148.
-      const response = await fetch(`${NetworkConfig[network].nearBlocksApiUrl}/v1/account/${accountId}/inventory`);
-      // ponytail: NearBlocks free tier is ~6 req/min — a miss just means "NEAR only"
-      if (!response.ok) return [nearBalance];
-
-      const body = (await response.json()) as {
-        inventory?: {
-          fts?: {
-            contract: string;
-            amount: string;
-            ft_meta?: { symbol?: string; decimals?: number; icon?: string };
-          }[];
-        };
-      };
-
-      const tokens = (body.inventory?.fts ?? []).flatMap((ft): HeldToken[] => {
-        const balance = BigInt(ft.amount ?? '0');
-        if (balance === 0n) return [];
-        return [
-          {
-            contractId: ft.contract,
-            symbol: ft.ft_meta?.symbol ?? ft.contract,
-            decimals: ft.ft_meta?.decimals ?? 24,
-            balance,
-            icon: ft.ft_meta?.icon ?? undefined,
-          },
-        ];
+      const rpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
+      const tokens = await readTokenHoldings({
+        known: queryClient.getQueryData<HeldToken[]>(['holdings', network, accountId])
+          ?? loadHoldings(network, accountId) ?? [],
+        sources: [
+          fetch(`${NetworkConfig[network].nearBlocksApiUrl}/v1/account/${accountId}/inventory`, { signal })
+            .then(async (response) => {
+              if (!response.ok) throw new Error(`NearBlocks token list failed (${response.status})`);
+              const body = await response.json() as { inventory?: { fts?: { contract: string; amount?: string; ft_meta?: TokenMetadata }[] } };
+              if (!body.inventory || !Array.isArray(body.inventory.fts)) throw new Error('Invalid NearBlocks inventory');
+              return body.inventory.fts.map((ft) => ({ contractId: ft.contract, balance: ft.amount, metadata: ft.ft_meta }));
+            }),
+          fetch(`${NetworkConfig[network].fastNearUrl}/v1/account/${accountId}/ft`, { signal })
+            .then(async (response) => {
+              if (!response.ok) throw new Error(`FastNEAR token list failed (${response.status})`);
+              const body = await response.json() as { tokens?: { contract_id: string }[] };
+              if (!Array.isArray(body.tokens)) throw new Error('Invalid FastNEAR token list');
+              return body.tokens.map((ft) => ({ contractId: ft.contract_id }));
+            }),
+        ],
+        balanceOf: async (contractId) => BigInt(await limitTokenRequests(() => rpc.callFunction({ contractId,
+          method: 'ft_balance_of', args: { account_id: accountId } })) as string),
+        metadataOf: (contractId) => limitTokenRequests(() => rpc.callFunction({ contractId, method: 'ft_metadata', args: {} })) as Promise<TokenMetadata>,
+        registered: async (contractId) => {
+          const balance = await limitTokenRequests(() => rpc.callFunction({ contractId, method: 'storage_balance_of',
+            args: { account_id: accountId } })).catch((error: unknown) => {
+              if (/MethodNotFound/.test(String(error))) return null;
+              throw error;
+            }) as { total?: string } | null;
+          return BigInt(balance?.total ?? '0') > 0n;
+        },
       });
-
-      // Legacy tokens (near-sdk 3.x) emit no events, so NearBlocks never sees a burn or an
-      // unregister and keeps showing the old balance. Confirm each one on-chain.
-      // ponytail: one view per token, 10 at a time; fine for tens of tokens
-      const directRpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
-      const confirmed: HeldToken[] = [];
-      for (let i = 0; i < tokens.length; i += 10)
-        await Promise.all(
-          tokens.slice(i, i + 10).map(async (token) => {
-            const onChain = await directRpc
-              .callFunction({ contractId: token.contractId, method: 'ft_balance_of', args: { account_id: accountId } })
-              .then((b) => BigInt(b as string), () => token.balance);
-            if (onChain > 0n) confirmed.push({ ...token, balance: onChain });
-          })
-        );
-
-      return [nearBalance, ...tokens.flatMap((t) => confirmed.filter((c) => c.contractId === t.contractId))];
+      const result = [nearBalance, ...tokens];
+      if (signal.aborted) throw new Error('Holdings refresh was cancelled.');
+      saveHoldings(network, accountId, result);
+      return result;
     },
   });
 }
 
-export type FtStorage = {
-  /** Contracts on the Ref Finance whitelist. */
-  verified: Set<string>;
-  /** NEAR locked as storage in each empty or unverified token this account is registered with. */
-  locked: Map<string, bigint>;
-  /** Registered tokens with a zero balance — NearBlocks' inventory leaves them out. */
-  empty: string[];
-};
-
-/** Which tokens are verified, and which registrations can be removed to get their storage NEAR back. */
-export function useFtStorage(accountId: string, held: HeldToken[] = []) {
-  const { viewFunction } = useNearWallet();
+/** Verification is the only prerequisite for removing a nonempty token. */
+export function useFtVerification(accountId: string) {
   const { network } = useNetwork();
-  const queryClient = useQueryClient();
-  // NearBlocks' inventory can hold tokens FastNEAR's list misses; check their storage too.
-  const heldIds = held.map((t) => t.contractId).filter((id) => id !== 'near');
-
   return useQuery({
-    queryKey: ['ft-storage', network, accountId, heldIds],
+    queryKey: ['ft-whitelist', network],
     enabled: accountId.length > 0,
-    staleTime: 60_000,
-    queryFn: async (): Promise<FtStorage> => {
-      // ponytail: sub-results cached in the QueryClient, so a refetch (focus, held list arriving)
-      // only hits the network for what expired. In-memory only; persist-client if reloads hurt.
-      const [list, whitelist] = await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: ['ft-storage', network, accountId, 'list'],
-          staleTime: 5 * 60_000,
-          // FastNEAR lists every token the account touched, zero balances included.
-          queryFn: async () => {
-            const response = await fetch(`${NetworkConfig[network].fastNearUrl}/v1/account/${accountId}/ft`);
-            if (!response.ok) throw new Error(`FastNEAR token list failed (${response.status})`);
-            return response.json() as Promise<{ tokens?: { contract_id: string; balance: string }[] }>;
-          },
-        }),
-        queryClient.fetchQuery({
-          queryKey: ['ft-whitelist', network],
-          staleTime: 60 * 60_000,
-          queryFn: () =>
-            viewFunction({
-              contractId: NetworkConfig[network].verifiedTokens,
-              method: 'get_whitelisted_tokens',
-            }) as Promise<string[]>,
-        }),
-      ]);
-      const verified = new Set(whitelist);
-      const listed = list.tokens ?? [];
-      const missing = heldIds
-        .filter((id) => !listed.some((t) => t.contract_id === id))
-        .map((contract_id) => ({ contract_id, balance: '' }));
-      const candidates = [...listed, ...missing].filter((t) => t.balance === '0' || !verified.has(t.contract_id));
-
-      // Direct provider: a contract without NEP-145 panics, which the wallet's provider logs as an error.
-      const directRpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
-      const locked = new Map<string, bigint>();
-      // ponytail: 10 calls at a time keeps the free RPC from rate-limiting; an account with hundreds of tokens takes a few seconds
-      for (let i = 0; i < candidates.length; i += 10)
-        await Promise.all(
-          candidates.slice(i, i + 10).map(async (t) => {
-            const total = await queryClient.fetchQuery({
-              queryKey: ['ft-storage', network, accountId, 'of', t.contract_id],
-              staleTime: 5 * 60_000,
-              queryFn: () => lockedStorage(directRpc, t.contract_id, accountId),
-            });
-            if (total !== null) locked.set(t.contract_id, total);
-          })
-        );
-
-      return {
-        verified,
-        locked,
-        empty: candidates.filter((t) => t.balance === '0' && locked.has(t.contract_id)).map((t) => t.contract_id),
-      };
-    },
+    staleTime: 60 * 60_000,
+    queryFn: () => limitTokenRequests(() => new JsonRpcProvider({ url: RpcUrls[network][0] }).callFunction({
+      contractId: NetworkConfig[network].verifiedTokens, method: 'get_whitelisted_tokens', args: {},
+    })) as Promise<string[]>,
   });
 }
 
@@ -192,131 +115,48 @@ export function useOwnedNfts(accountId: string) {
   });
 }
 
-export type KeypomDrop = {
+export type Linkdrop = {
   drop_id: string;
-  /** near-drop entries reconstructed from browser-held keys have no delete API. */
-  locallyManaged?: boolean;
-  metadata?: string | null;
-  next_key_id?: number;
-  /** Present on token drops: those assets have to be refunded before deleting. */
-  ft?: unknown;
-  nft?: unknown;
-  /** Uses with an asset still deposited; refund_assets panics when it is 0. */
-  registered_uses?: number;
-  /** Every link this browser holds; `claimed` once the key is gone from the contract. */
-  keys?: (DropKey & { claimed: boolean })[];
+  name: string;
+  exists: boolean;
+  ready: boolean;
+  keys: (DropKey & { claimed: boolean })[];
 };
 
-/** Drops this account created, each with the local keys and whether they were claimed. */
+/** The contract has no owner index; discover drops from scoped local records. */
 export function useDrops(accountId: string) {
-  const { viewFunction } = useNearWallet();
   const { network } = useNetwork();
-  const linkdrop = ActionContracts[network].linkdrop;
-  const keypom = linkdrop.contractId;
-
+  const contractId = ActionContracts[network].linkdrop.contractId;
+  const scope = { network, contractId, accountId };
   return useQuery({
-    queryKey: ['drops', network, accountId],
+    queryKey: ['drops', network, accountId, contractId],
     enabled: accountId.length > 0,
     staleTime: 60_000,
     queryFn: async () => {
-      // near-drop has no owner index. Reconstruct this browser's drops from its
-      // locally retained secret keys, then keep only keys that remain on-chain.
-      if (linkdrop.provider === 'near-drop') {
-        const dropIds = loadStoredDropIds(network);
-        // The wallet's failover provider logs expected contract panics to
-        // console.error, which opens Next's dev overlay even when caught. A
-        // direct provider lets a missing/claimed key remain a normal result.
-        const directRpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
-        const drops = await Promise.all(
-          dropIds.map(async (dropId): Promise<KeypomDrop> => {
-            const local = loadDropKeys(network, dropId);
-            const keys = await Promise.all(
-              local.map(async (key) => {
-                try {
-                  const onChainId = await directRpc.callFunction({
-                    contractId: keypom,
-                    method: 'get_drop_id_by_key',
-                    args: { public_key: key.public },
-                  });
-                  return { ...key, claimed: String(onChainId) !== dropId };
-                } catch {
-                  return { ...key, claimed: true };
-                }
-              })
-            );
-            const dropName = loadDropName(network, dropId);
-            return {
-              drop_id: dropId,
-              metadata: dropName ? JSON.stringify({ dropName }) : null,
-              next_key_id: local.length,
-              keys,
-              locallyManaged: true,
-            };
-          })
-        );
-        return drops;
-      }
-      const drops = (await viewFunction({
-        contractId: keypom,
-        method: 'get_drops_for_owner',
-        args: { account_id: accountId, from_index: '0', limit: 50 },
-      })) as KeypomDrop[];
-
-      // next_key_id only counts keys ever created, so the remaining links are the
-      // locally stored keys that the contract still knows about.
-      return Promise.all(
-        drops.map(async (drop) => {
-          const local = loadDropKeys(network, drop.drop_id);
-          if (local.length === 0) return drop;
-          const onChainKeys = (await viewFunction({
-            contractId: keypom,
-            method: 'get_keys_for_drop',
-            args: { drop_id: drop.drop_id },
-          }).catch(() => [])) as { pk: string }[];
-          return {
-            ...drop,
-            keys: local.map((key) => ({
-              ...key,
-              claimed: !onChainKeys.some((onChain) => onChain.pk === key.public),
-            })),
-          };
-        })
-      );
+      const rpc = new JsonRpcProvider({ url: RpcUrls[network][0] });
+      const missing = (error: unknown) => /No drop information for such drop_id|No drop for public key/.test(String(error));
+      const drops = await Promise.all(loadStoredDropIds(scope).map(async (dropId): Promise<Linkdrop | null> => {
+        const drop = await rpc.callFunction({ contractId, method: 'get_drop_by_id',
+          args: { drop_id: Number(dropId) } }).catch((error: unknown) => {
+            if (missing(error)) return null;
+            throw error;
+          }) as OnChainDrop | null;
+        if (drop && dropData(drop).funder !== accountId) return null;
+        const keys = await Promise.all(loadDropKeys(scope, dropId).map(async (key) => {
+          if (!drop) return { ...key, claimed: true };
+          try {
+            const id = await rpc.callFunction({ contractId, method: 'get_drop_id_by_key', args: { public_key: key.public } });
+            return { ...key, claimed: String(id) !== dropId };
+          } catch (error) {
+            if (missing(error)) return { ...key, claimed: true };
+            throw error;
+          }
+        }));
+        return { drop_id: dropId, name: loadDropName(scope, dropId), exists: !!drop,
+          ready: !!drop && dropReady(drop), keys };
+      }));
+      return drops.filter((drop): drop is Linkdrop => drop !== null);
     },
   });
 }
 
-/** Deleting a drop refunds into Keypom's own ledger, not straight to the wallet. */
-export function useKeypomBalance(accountId: string) {
-  const { viewFunction } = useNearWallet();
-  const { network } = useNetwork();
-  const linkdrop = ActionContracts[network].linkdrop;
-  const keypom = linkdrop.contractId;
-
-  return useQuery({
-    queryKey: ['keypom-balance', network, accountId],
-    enabled: accountId.length > 0,
-    queryFn: async () => {
-      if (linkdrop.provider === 'near-drop') return '0';
-      return ((await viewFunction({
-        contractId: keypom,
-        method: 'get_user_balance',
-        args: { account_id: accountId },
-      }).catch(() => '0')) ?? '0') as string;
-    },
-  });
-}
-
-/** NEAR locked in `contractId`'s storage for `accountId`, or null when there's nothing removable. */
-async function lockedStorage(rpc: JsonRpcProvider, contractId: string, accountId: string): Promise<bigint | null> {
-  const storage = (await rpc
-    .callFunction({ contractId, method: 'storage_balance_of', args: { account_id: accountId } })
-    .catch(() => null)) as { total?: string } | null;
-  if (!storage?.total) return null;
-  // Some NEP-145 tokens (e.g. cb.tkn.primitives.near) skip storage_unregister. A view call
-  // tells them apart: a real one panics asking for 1 yocto, a missing one is MethodNotFound.
-  const unregisterable = await rpc
-    .callFunction({ contractId, method: 'storage_unregister', args: {} })
-    .then(() => true, (error: unknown) => !String(error).includes('MethodNotFound'));
-  return unregisterable ? BigInt(storage.total) : null;
-}

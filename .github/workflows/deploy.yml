@@ -26,13 +26,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
       - run: npm ci
-      - run: npm run build
+      - run: npm run check
+      - name: Refresh validators
+        run: npm run fetch:validators
         env:
           NEARBLOCKS_API_KEY: ${{ secrets.NEARBLOCKS_API_KEY }}
-      - uses: actions/upload-pages-artifact@v3
+      - name: Build static site
+        run: npx next build
+        env:
+          NEXT_PUBLIC_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: out
       - id: deployment

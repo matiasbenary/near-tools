@@ -80,7 +80,7 @@ export function TestnetFaucet({ accountId }: { accountId: string }) {
     <aside className="faucet-panel" aria-labelledby="faucet-title">
       <p className="wizard-kicker">Testnet utility</p>
       <h2 id="faucet-title">Get 5 test NEAR</h2>
-      <p>The faucet creates a temporary account, funds this account, and removes the temporary account.</p>
+      <p>Get test NEAR for a testnet account to try transactions.</p>
       <form className="faucet-form" onSubmit={requestFunds}>
         <label className="wizard-field">
           <span>Testnet account</span>

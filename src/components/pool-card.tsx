@@ -5,12 +5,12 @@ import { parseNearAmount, yoctoToNear } from 'near-api-js';
 import { LiquidPool, NetworkConfig } from '@/config';
 import { useNetwork } from '@/components/app-providers';
 import { StakingAction, useStakingAction } from '@/hooks/use-staking';
+import { AmountInput } from './amount-input';
 import { ReviewSheet } from '@/components/review-sheet';
 import { ActivityEntry, ResultSheet, useActivity } from '@/components/result-sheet';
 import { describeError } from '@/lib/errors';
-import { nonNegative } from '@/components/actions/form-fields';
 import { formatNear, isAmount, toInputAmount, txHashOf } from '@/lib/near';
-import { apyLabel, GAS_RESERVE, minFastUnstake, PoolAccount } from '@/lib/staking';
+import { apyLabel, formatNearBalance, formatTokenBalance, GAS_RESERVE, minFastUnstake, PoolAccount } from '@/lib/staking';
 
 type Mode = 'stake' | 'unstake' | 'fast' | 'withdraw';
 
@@ -30,42 +30,6 @@ type Pending = {
 
 const toYocto = (amount: string) => parseNearAmount(amount as `${number}`) ?? '0';
 
-function AmountInput({
-  amount,
-  setAmount,
-  maxAmount,
-  unit,
-  busy,
-  ariaLabel,
-  overMax = false,
-  disabled = false,
-}: {
-  amount: string;
-  setAmount: (amount: string) => void;
-  maxAmount: string;
-  unit: string;
-  busy: boolean;
-  ariaLabel: string;
-  overMax?: boolean;
-  disabled?: boolean;
-}) {
-  return (
-    <div className={`amount${overMax ? ' over' : ''}`}>
-      <input
-        type="number"
-        placeholder="0.0"
-        value={amount}
-        {...nonNegative(setAmount)}
-        aria-label={ariaLabel}
-      />
-      <button className="max" disabled={busy || disabled} onClick={() => setAmount(maxAmount)}>
-        MAX
-      </button>
-      <span className="unit">{unit}</span>
-    </div>
-  );
-}
-
 /** Pool name, APY breakdown and what this account holds in it. */
 function PoolSummary({
   poolId,
@@ -82,7 +46,7 @@ function PoolSummary({
   liquidPool: LiquidPool | undefined;
   liquidBalance: string | undefined;
 }) {
-  const staked = account ? formatNear(BigInt(account.staked_balance)) : '—';
+  const staked = account ? formatNearBalance(BigInt(account.staked_balance)) : '—';
   return (
     <>
       <h2>{poolId}</h2>
@@ -103,7 +67,7 @@ function PoolSummary({
           <span>Staked here</span>
           <span>
             {liquidPool && liquidBalance !== undefined
-              ? `${formatNear(BigInt(liquidBalance), liquidPool.token)}${
+              ? `${formatTokenBalance(BigInt(liquidBalance), liquidPool.token)}${
                   account && BigInt(account.staked_balance) > 0n ? ` (${staked})` : ''
                 }`
               : staked}
@@ -111,7 +75,7 @@ function PoolSummary({
         </div>
         <div className="kv">
           <span>Unstaked here</span>
-          <span>{account ? formatNear(BigInt(account.unstaked_balance)) : '—'}</span>
+          <span>{account ? formatNearBalance(BigInt(account.unstaked_balance)) : '—'}</span>
         </div>
       </div>
     </>

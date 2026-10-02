@@ -137,12 +137,10 @@ export function FunctionCallKeys() {
     <section className="keys-shell" aria-labelledby="keys-title">
       <header className="keys-header">
         <div>
-          <p className="wizard-kicker">{network} account security</p>
           <h1 id="keys-title">Function-call keys</h1>
           <p>Restricted keys let apps call specific contracts without holding full control of your account.</p>
         </div>
         <div className="keys-account">
-          <span>{signedAccountId}</span>
           <small>{query.isLoading ? 'Checking…' : `${keys.length} active`}</small>
         </div>
       </header>

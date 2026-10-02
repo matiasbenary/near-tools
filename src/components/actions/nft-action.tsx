@@ -72,8 +72,7 @@ export function NftAction() {
 
   return (
     <WizardShell
-      kind="nft"
-      title="Create NFT"
+      title="Mint a Non-Fungible Token"
       description="Mint a token into the shared NEP-171 collection. Your wallet owns it."
       dirty={form.dirty}
       review={review}

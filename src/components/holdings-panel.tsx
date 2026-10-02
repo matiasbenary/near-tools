@@ -3,20 +3,17 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNearWallet } from 'near-connect-hooks';
-import { yoctoToNear } from 'near-api-js';
-import { ArrowDownToLine, BadgeCheck, Link, Send, ShieldAlert, Trash2 } from 'lucide-react';
+import { BadgeCheck, Link, ShieldAlert, Trash2 } from 'lucide-react';
 import { useNetwork } from '@/components/app-providers';
 import { IPFS } from '@/hooks/use-avatar';
-import { ConfirmDialog, DropDialog, Removable, RemoveTokensDialog, SendDialog, SendTarget } from '@/components/holding-dialogs';
+import { ConfirmDialog, DropDialog, Removable, RemoveTokensDialog } from '@/components/holding-dialogs';
 import {
-  FtStorage,
   HeldToken,
-  KeypomDrop,
+  Linkdrop,
   OwnedNft,
   useDrops,
-  useFtStorage,
+  useFtVerification,
   useHoldings,
-  useKeypomBalance,
   useOwnedNfts,
 } from '@/hooks/use-holdings';
 import { ActionContracts, ActionKind, fromUnits } from '@/lib/actions/contracts';
@@ -32,7 +29,7 @@ const titles: Record<ActionKind, string> = {
 
 const columns: Record<ActionKind, string[]> = {
   ft: ['Token', 'Contract', 'Balance', 'Action'],
-  nft: ['NFT', 'Token ID', 'Owner', 'Action'],
+  nft: ['NFT', 'Token ID', 'Owner'],
   linkdrop: ['Drop', 'Drop ID', 'Links', 'Action'],
 };
 
@@ -44,14 +41,13 @@ const empty: Record<ActionKind, string> = {
 
 /** What the account already owns, above the form that creates more of it. */
 export function HoldingsPanel({ kind }: { kind: ActionKind }) {
-  const { signedAccountId, callFunction, signAndSendTransactions } = useNearWallet();
+  const { signedAccountId, signAndSendTransactions } = useNearWallet();
   const { network } = useNetwork();
   const accountId = signedAccountId ?? '';
   const contracts = ActionContracts[network];
   const queryClient = useQueryClient();
   const [busyDrop, setBusyDrop] = useState('');
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
-  const [sending, setSending] = useState<SendTarget | null>(null);
   const [openDrop, setOpenDrop] = useState<Row | null>(null);
   /** Contract ids ticked for a batch storage removal. */
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -62,11 +58,10 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
   const [asking, setAsking] = useState<{ title: string; text: string; go: () => void } | null>(null);
 
   const ft = useHoldings(kind === 'ft' ? accountId : '');
-  const storage = useFtStorage(kind === 'ft' ? accountId : '', ft.data);
+  const verification = useFtVerification(kind === 'ft' ? accountId : '');
   const nft = useOwnedNfts(kind === 'nft' ? accountId : '');
 
   const drops = useDrops(kind === 'linkdrop' ? accountId : '');
-  const keypomBalance = useKeypomBalance(kind === 'linkdrop' ? accountId : '');
 
   const run = async (label: string, body: () => Promise<unknown>, done: string) => {
     setBusyDrop(label);
@@ -89,7 +84,6 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
         queryClient.invalidateQueries({
           queryKey: ['drops', network, accountId],
         });
-        keypomBalance.refetch();
       });
     } catch (error) {
       setNote({ ok: false, text: describeError(error).message });
@@ -98,50 +92,25 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
     }
   };
 
-  /** One confirm and one wallet prompt for any number of drops. */
-  const deleteDrops = (list: KeypomDrop[], label: string) => {
-    const local = list.filter((drop) => drop.locallyManaged);
-    const keypom = list.filter((drop) => !drop.locallyManaged);
-    const unclaimed = local.reduce((sum, drop) => sum + (drop.keys?.filter((key) => !key.claimed).length ?? 0), 0);
+  /** Cancel remaining keys on-chain before removing this browser's copies. */
+  const deleteDrops = (list: Linkdrop[], label: string) => {
+    const active = list.filter((drop) => drop.exists);
     const what = list.length === 1 ? `drop ${list[0].drop_id}` : `${list.length} drops`;
-    const warnings = [
-      keypom.length > 0 &&
-        'Every link that has not been claimed stops working. The NEAR goes back to your Keypom balance, which you can then withdraw.',
-      unclaimed > 0 && `${unclaimed} link(s) stored in this browser are still unclaimed and will be lost for good.`,
-    ].filter(Boolean);
-    setAsking({ title: `Delete ${what}?`, text: warnings.join(' ') || 'It is removed from this browser.', go: () => removeDrops(local, keypom, label) });
-  };
-
-  const removeDrops = (local: KeypomDrop[], keypom: KeypomDrop[], label: string) => {
-    const call = (method: string, dropId: string) => ({
-      receiverId: contracts.linkdrop.contractId,
-      signerId: accountId,
-      actions: [
-        {
-          type: 'FunctionCall' as const,
-          params: { methodName: method, args: { drop_id: dropId }, gas: GAS_300.toString(), deposit: '0' },
-        },
-      ],
-    });
-    return run(
-      label,
-      async () => {
-        // ponytail: near-drop has no delete API — forgetting is all this browser can do
-        local.forEach((drop) => forgetDrop(network, drop.drop_id));
-        if (keypom.length === 0) return;
-        await signAndSendTransactions({
-          transactions: keypom.flatMap((drop) => [
-            // Assets first — Keypom refuses to delete a drop that still holds them.
-            ...((drop.ft || drop.nft) && drop.registered_uses ? [call('refund_assets', drop.drop_id)] : []),
-            // Deletes up to 100 keys per call, so a big drop needs more than one.
-            call('delete_keys', drop.drop_id),
-          ]),
+    setAsking({ title: `Delete ${what}?`,
+      text: active.length > 0
+        ? 'Remaining links stop working. Unused NEAR or FT assets and budgets are refunded directly to your account. NFTs remain yours; you can revoke their approval separately.'
+        : 'All links are already claimed or cancelled. Remove their records from this browser?',
+      go: () => run(label, async () => {
+        if (active.length > 0) await signAndSendTransactions({
+          transactions: active.map((drop) => ({
+            receiverId: contracts.linkdrop.contractId, signerId: accountId,
+            actions: [{ type: 'FunctionCall' as const, params: { methodName: 'delete_drop',
+              args: { drop_id: Number(drop.drop_id) }, gas: GAS_300.toString(), deposit: '0' } }],
+          })),
         });
-      },
-      keypom.length > 0
-        ? 'Deleted. A drop still listed had over 100 links — delete it again. The refund is in your Keypom balance.'
-        : 'Removed from this browser.',
-    );
+        list.forEach((drop) => forgetDrop({ network, contractId: contracts.linkdrop.contractId, accountId }, drop.drop_id));
+      }, active.length > 0 ? 'Deleted. Refunds go directly to your account.' : 'Removed from this browser.'),
+    });
   };
 
   /**
@@ -149,10 +118,6 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
    * token still holding a balance needs force, which burns that balance.
    */
   const unregister = (removables: Removable[], label: string) => {
-    const recovered = `${yoctoToNear(
-      removables.reduce((sum, r) => sum + r.locked, 0n),
-      5,
-    )} Ⓝ`;
     return run(
       label,
       () =>
@@ -174,28 +139,15 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
             ],
           })),
         }),
-      `Recovered ${recovered}.`,
+      'Removal transaction completed.',
     );
   };
-
-  const withdraw = () =>
-    run(
-      'withdraw',
-      () =>
-        callFunction({
-          contractId: contracts.linkdrop.contractId,
-          method: 'withdraw_from_balance',
-          args: {},
-          gas: GAS_300.toString(),
-        }),
-      'Withdrawn to your account.',
-    );
 
   if (!accountId) return null;
 
   const query = kind === 'ft' ? ft : kind === 'nft' ? nft : drops;
   const rows =
-    kind === 'ft' ? ftRows(ft.data, storage.data) : kind === 'nft' ? nftRows(nft.data) : dropRows(drops.data);
+    kind === 'ft' ? ftRows(ft.data, verification.data) : kind === 'nft' ? nftRows(nft.data) : dropRows(drops.data);
   const selectable = rows.filter((row) => (kind === 'ft' ? row.removable : row.drop));
   // Rows vanish after a removal or refetch, so only count ticks that still have a row.
   const pickedRows = selectable.filter((row) => selected.has(row.key));
@@ -227,26 +179,16 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
         {rows.length > 0 && <span className="meta">{rows.length}</span>}
       </summary>
       {query.isLoading && <p className="hint">Loading…</p>}
-      {query.isError && <p className="hint error">Could not read this account&apos;s holdings.</p>}
+      {query.isError && <p className="hint error">{kind === 'ft'
+        ? 'Could not refresh this account’s holdings. Previously loaded balances may be out of date.'
+        : 'Could not read this account’s holdings.'}</p>}
+      {kind === 'ft' && ft.data?.some((token) => token.stale) && (
+        <p className="hint">Some token balances could not be refreshed. Showing their last available balances.</p>
+      )}
       {query.isSuccess && rows.length === 0 && <p className="hint">{empty[kind]}</p>}
       {pickedRows.length > 0 && (
         <div className="holdings-bulk" role="toolbar" aria-label="Selected rows">
-          <span>
-            {pickedRows.length} selected
-            {kind === 'ft' && (
-              <>
-                {' '}
-                · recovers{' '}
-                <strong>
-                  {yoctoToNear(
-                    picked.reduce((sum, r) => sum + r.locked, 0n),
-                    5,
-                  )}{' '}
-                  Ⓝ
-                </strong>
-              </>
-            )}
-          </span>
+          <span>{pickedRows.length} selected</span>
           <span className="holdings-bulk-actions">
             <button className="btn btn-ghost" disabled={busyDrop.length > 0} onClick={() => setSelected(new Set())}>
               Clear
@@ -341,62 +283,61 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
                   {row.sub}
                 </td>
                 <td className="holdings-value">{row.value}</td>
-                <td className="holdings-action">
-                  {row.removable ? (
-                    <button
-                      className="btn btn-ghost holdings-icon-btn holdings-remove"
-                      disabled={busyDrop.length > 0}
-                      aria-label={`Remove ${row.label}`}
-                      title={`Remove · recovers ${yoctoToNear(row.removable.locked, 5)} Ⓝ of storage`}
-                      onClick={() =>
-                        setConfirming({
-                          tokens: [row.removable!],
-                          label: row.key,
-                        })
-                      }
-                    >
-                      <Trash2 aria-hidden />
-                    </button>
-                  ) : row.drop ? (
-                    <button
-                      className="btn btn-ghost holdings-icon-btn holdings-remove"
-                      disabled={busyDrop.length > 0}
-                      aria-label={`Delete ${row.label}`}
-                      title={row.drop.locallyManaged ? 'Remove from this browser' : 'Delete drop'}
-                      onClick={() => deleteDrops([row.drop!], row.key)}
-                    >
-                      <Trash2 aria-hidden />
-                    </button>
-                  ) : (
-                    kind === 'ft' && <span className="holdings-icon-slot" />
-                  )}
-                  {row.send?.kind === 'ft' && row.send.token.balance === 0n ? (
-                    <span className="holdings-icon-slot" />
-                  ) : (
-                    <button
-                      className="btn btn-ghost holdings-icon-btn"
-                      aria-label={`${row.send ? 'Send' : 'Links for'} ${row.label}`}
-                      title={row.send ? 'Send' : 'Links'}
-                      onClick={() => (row.send ? setSending(row.send) : setOpenDrop(row))}
-                    >
-                      {row.send ? <Send aria-hidden /> : <Link aria-hidden />}
-                    </button>
-                  )}
-                </td>
+                {kind !== 'nft' && (
+                  <td className="holdings-action">
+                    {row.removable ? (
+                      <button
+                        className="btn btn-ghost holdings-icon-btn holdings-remove"
+                        disabled={busyDrop.length > 0}
+                        aria-label={`Remove ${row.label}`}
+                        title="Remove token"
+                        onClick={() =>
+                          setConfirming({
+                            tokens: [row.removable!],
+                            label: row.key,
+                          })
+                        }
+                      >
+                        <Trash2 aria-hidden />
+                      </button>
+                    ) : row.drop ? (
+                      <button
+                        className="btn btn-ghost holdings-icon-btn holdings-remove"
+                        disabled={busyDrop.length > 0}
+                        aria-label={`Delete ${row.label}`}
+                        title={row.drop.exists ? 'Delete drop & refund' : 'Remove from this browser'}
+                        onClick={() => deleteDrops([row.drop!], row.key)}
+                      >
+                        <Trash2 aria-hidden />
+                      </button>
+                    ) : (
+                      kind === 'ft' && <span className="holdings-icon-slot" />
+                    )}
+                    {row.drop && (
+                      <button
+                        className="btn btn-ghost holdings-icon-btn"
+                        aria-label={`Links for ${row.label}`}
+                        title="Links"
+                        onClick={() => setOpenDrop(row)}
+                      >
+                        <Link aria-hidden />
+                      </button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
         </table>
       )}
-      {kind === 'ft' && storage.isLoading && <p className="hint">Checking verification and storage…</p>}
-      {kind === 'ft' && storage.isError && (
-        <p className="hint error">Could not check verification or storage: {describeError(storage.error).message}</p>
+      {kind === 'ft' && verification.isLoading && <p className="hint">Checking verification…</p>}
+      {kind === 'ft' && verification.isError && (
+        <p className="hint error">Could not check verification: {describeError(verification.error).message}</p>
       )}
-      {kind === 'ft' && storage.data && (
+      {kind === 'ft' && verification.data && (
         <p className="hint">
           <BadgeCheck className="hint-icon verified" aria-hidden /> on the Ref Finance whitelist ·{' '}
-          <ShieldAlert className="hint-icon" aria-hidden /> not on it. Empty or unverified tokens can be removed to get
-          back the NEAR locked as storage.
+          <ShieldAlert className="hint-icon" aria-hidden /> not on it. Empty or unverified tokens can be selected for removal.
         </p>
       )}
       {confirming && (
@@ -421,19 +362,6 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
           }}
         />
       )}
-      {sending && (
-        <SendDialog
-          target={sending}
-          onClose={() => setSending(null)}
-          onSent={() =>
-            refreshAfterTx(() =>
-              queryClient.invalidateQueries({
-                queryKey: [kind === 'ft' ? 'holdings' : 'owned-nfts'],
-              }),
-            )
-          }
-        />
-      )}
       {openDrop?.drop && (
         <DropDialog
           drop={openDrop.drop}
@@ -448,15 +376,7 @@ export function HoldingsPanel({ kind }: { kind: ActionKind }) {
           {note.text}
         </p>
       )}
-      {kind === 'linkdrop' && BigInt(keypomBalance.data ?? '0') > 0n && (
-        <p className="hint">
-          {yoctoToNear(BigInt(keypomBalance.data ?? '0'), 4)} Ⓝ refunded into Keypom.{' '}
-          <button className="btn btn-ghost" disabled={busyDrop.length > 0} onClick={withdraw}>
-            <ArrowDownToLine aria-hidden />
-            {busyDrop === 'withdraw' ? 'Withdrawing…' : 'Withdraw to my account'}
-          </button>
-        </p>
-      )}
+
     </details>
   );
 }
@@ -467,28 +387,16 @@ type Row = {
   sub: string;
   value: string;
   icon?: string;
-  send?: SendTarget;
-  drop?: KeypomDrop;
+  drop?: Linkdrop;
   verified?: boolean;
-  /** Set when the token is empty or unverified and the account holds storage in it. */
+  /** Empty or unverified tokens can attempt removal without storage preflight checks. */
   removable?: Removable;
 };
 
-const emptyToken = (contractId: string): HeldToken => ({
-  contractId,
-  symbol: contractId,
-  decimals: 24,
-  balance: 0n,
-});
-
-const ftRows = (tokens?: HeldToken[], storage?: FtStorage): Row[] => {
-  const held = (tokens ?? []).filter((token) => token.contractId !== 'near');
-  const empty = (storage?.empty ?? [])
-    .filter((contractId) => !held.some((token) => token.contractId === contractId))
-    .map(emptyToken);
-  return [...held, ...empty].map((token) => {
-    const locked = storage?.locked.get(token.contractId);
-    const verified = storage?.verified.has(token.contractId);
+const ftRows = (tokens?: HeldToken[], whitelist?: string[]): Row[] => {
+  const verifiedTokens = whitelist ? new Set(whitelist) : undefined;
+  return (tokens ?? []).filter((token) => token.contractId !== 'near').map((token) => {
+    const verified = verifiedTokens?.has(token.contractId);
     return {
       key: token.contractId,
       label: token.symbol,
@@ -496,11 +404,10 @@ const ftRows = (tokens?: HeldToken[], storage?: FtStorage): Row[] => {
       // Dust rounds to 0 at 4 places; say so, or it looks removable without burning anything.
       value: token.balance > 0n && fromUnits(token.balance, token.decimals) === '0' ? '< 0.0001' : groupDigits(fromUnits(token.balance, token.decimals)),
       icon: token.icon,
-      send: { kind: 'ft', token },
       verified,
-      removable: locked && (token.balance === 0n || !verified) ? { token, locked } : undefined,
+      removable: token.balance === 0n || verified === false ? { token } : undefined,
     };
-  });
+  }).sort((a, b) => Number(b.verified === true) - Number(a.verified === true));
 };
 
 /** 1000000.5 → 1,000,000.5 without going through Number, so big balances keep every digit. */
@@ -520,25 +427,13 @@ const nftRows = (tokens?: OwnedNft[]): Row[] =>
     sub: token.token_id,
     value: token.owner_id ?? '',
     icon: nftMedia(token.metadata?.media),
-    send: { kind: 'nft', token },
   }));
 
-const dropRows = (drops?: KeypomDrop[]): Row[] =>
+const dropRows = (drops?: Linkdrop[]): Row[] =>
   (drops ?? []).map((drop) => ({
-    key: drop.drop_id,
-    drop,
-    // ponytail: metadata is whatever the creator wrote — ours is {"dropName"}
-    label: parseDropName(drop.metadata) || `Drop #${drop.drop_id}`,
+    key: drop.drop_id, drop, label: drop.name || `Drop #${drop.drop_id}`,
     sub: drop.drop_id,
-    value: drop.keys
-      ? `${drop.keys.filter((key) => !key.claimed).length} of ${drop.keys.length} unclaimed`
-      : `${drop.next_key_id ?? 0} created`,
+    value: !drop.exists ? 'Claimed or cancelled'
+      : !drop.ready ? 'Awaiting asset funding'
+      : `${drop.keys.filter((key) => !key.claimed).length} of ${drop.keys.length} unclaimed`,
   }));
-
-function parseDropName(metadata?: string | null): string {
-  try {
-    return (JSON.parse(metadata ?? '') as { dropName?: string }).dropName ?? '';
-  } catch {
-    return '';
-  }
-}

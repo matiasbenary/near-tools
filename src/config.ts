@@ -18,6 +18,7 @@ export type LiquidPool = {
 export const NetworkConfig: Record<
   NetworkId,
   {
+    lockupSuffix: string;
     fastNearUrl: string;
     nearBlocksApiUrl: string;
     /** Exposes get_whitelisted_tokens — what this app calls a verified token. */
@@ -30,6 +31,7 @@ export const NetworkConfig: Record<
   }
 > = {
   mainnet: {
+    lockupSuffix: 'lockup.near',
     fastNearUrl: 'https://api.fastnear.com',
     nearBlocksApiUrl: 'https://api.nearblocks.io',
     verifiedTokens: 'v2.ref-finance.near',
@@ -50,6 +52,7 @@ export const NetworkConfig: Record<
     ],
   },
   testnet: {
+    lockupSuffix: 'lockup.devnet',
     fastNearUrl: 'https://test.api.fastnear.com',
     nearBlocksApiUrl: 'https://api-testnet.nearblocks.io',
     verifiedTokens: 'ref-finance-101.testnet',

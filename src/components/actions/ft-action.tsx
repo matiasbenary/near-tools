@@ -2,10 +2,12 @@
 
 import { useState } from 'react';
 import { useNearWallet } from 'near-connect-hooks';
+import { useQueryClient } from '@tanstack/react-query';
 import { yoctoToNear } from 'near-api-js';
 import { useNetwork } from '@/components/app-providers';
 import { ActionContracts, FtCreateArgs, ftTotalSupply } from '@/lib/actions/contracts';
 import { GAS_300, txHashOf } from '@/lib/near';
+import { loadHoldings, saveHoldings, type HeldToken } from '@/lib/holdings';
 import { Field, ImageField, useForm } from './form-fields';
 import { WizardShell } from './wizard-shell';
 
@@ -18,6 +20,7 @@ export function FtAction() {
   const { fields, bind } = form;
   const [deposit, setDeposit] = useState(0n);
   const factory = ActionContracts[network].ft;
+  const queryClient = useQueryClient();
   const symbol = fields.symbol.toUpperCase();
   const tokenAccount = fields.symbol ? factory.accountFor(fields.symbol) : '';
 
@@ -86,6 +89,19 @@ export function FtAction() {
       gas: GAS_300.toString(),
       deposit: deposit.toString(),
     });
+    // The factory gives the owner the full supply. Remember the contract now,
+    // without waiting for either indexer to discover its first event.
+    const created: HeldToken = {
+      contractId: tokenAccount, symbol, decimals: Number(fields.decimals),
+      balance: ftTotalSupply(fields.supply, Number(fields.decimals)), icon: fields.icon,
+    };
+    const key = ['holdings', network, owner];
+    await queryClient.cancelQueries({ queryKey: key });
+    const previous = queryClient.getQueryData<HeldToken[]>(key) ?? loadHoldings(network, owner) ?? [];
+    const tokens = [...previous.filter((token) => token.contractId !== tokenAccount), created];
+    saveHoldings(network, owner, tokens);
+    queryClient.setQueryData(key, tokens);
+    queryClient.invalidateQueries({ queryKey: ['ft-storage', network, owner] });
     form.reset();
     return {
       summary: `Created ${symbol} at ${tokenAccount}`,
@@ -96,9 +112,8 @@ export function FtAction() {
 
   return (
     <WizardShell
-      kind="ft"
-      title="Create FT"
-      description="Deploy a NEP-141 fungible token through the audited factory. The contract account is derived from your symbol."
+      title="Mint a Fungible Token"
+      description="Deploy a NEP-141 fungible token through the token factory."
       dirty={form.dirty}
       review={review}
       submit={submit}
@@ -125,7 +140,8 @@ export function FtAction() {
         {...bind('icon')}
         label="Token icon"
         maxBytes={10 * 1024}
-        hint="PNG, JPEG, GIF or SVG · 1:1 · max 10 KB — the factory stores it on chain."
+        resizeTo={128}
+        hint="PNG, JPEG, GIF or SVG · Large icons are resized and compressed to fit within 10 KB on chain."
       />
     </WizardShell>
   );

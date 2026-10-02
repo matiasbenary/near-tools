@@ -5,6 +5,12 @@ import { Navigation } from '@/components/navigation';
 import { ReactNode } from 'react';
 import { AppProviders } from '@/components/app-providers';
 import { SiteFooter } from '@/components/site-footer';
+import type { Metadata } from 'next';
+
+export const metadata: Metadata = {
+  title: 'Simplr Tools',
+  description: 'Simple tools for staking, tokens, NFTs, linkdrops, and key cleanup on NEAR.',
+};
 
 const sans = Inter({
   subsets: ['latin'],

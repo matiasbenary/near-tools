@@ -227,7 +227,7 @@ a {
   min-width: 0;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
   /* links get their own full-width row under brand + actions */
   .nav-inner {
     flex-wrap: wrap;
@@ -330,33 +330,14 @@ a {
 
 .actions-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--s4);
   align-items: start;
-}
-
-/* The faucet comes first in the DOM on testnet so it is reachable without
-   scrolling past the form; on desktop it belongs in the right-hand column. */
-@media (min-width: 721px) {
-  .wizard-shell {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .faucet-panel {
-    grid-column: 2;
-    grid-row: 1;
-  }
-}
-
-.actions-layout:not(:has(.faucet-panel)) {
-  grid-template-columns: minmax(0, 1fr);
   max-width: var(--col);
   margin: 0 auto;
 }
 
-/* without the faucet column the holdings panel shares the form's column */
-.actions-page:not(:has(.faucet-panel)) .holdings-panel {
+.actions-page .holdings-panel {
   max-width: var(--col);
   margin-inline: auto;
 }
@@ -379,7 +360,7 @@ a {
   justify-content: space-between;
   gap: 24px;
   padding: var(--s5);
-  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--s4);
 }
 
 .wizard-kicker {
@@ -391,7 +372,7 @@ a {
 }
 
 .wizard-header h1 {
-  margin-top: 6px;
+  margin-top: 0;
   font-size: clamp(1.7rem, 4vw, 2.5rem);
   line-height: 1.08;
   letter-spacing: -0.035em;
@@ -598,9 +579,18 @@ a {
 }
 
 .faucet-panel {
-  position: sticky;
-  top: 76px;
   padding: var(--s5);
+}
+
+.faucet-tool {
+  max-width: var(--col);
+  margin: 0 auto;
+}
+
+.faucet-tool > h1 {
+  margin-bottom: 24px;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  letter-spacing: -0.03em;
 }
 
 .faucet-form {
@@ -1902,6 +1892,92 @@ a {
   margin-bottom: 8px;
 }
 
+/* One public landing page and compact tool login prompts. */
+.tool-login {
+  padding-top: 72px;
+  padding-bottom: 96px;
+}
+
+.tool-login section {
+  max-width: var(--col);
+  margin: 0 auto;
+}
+
+.tool-login h1 {
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  letter-spacing: -0.03em;
+}
+
+.tool-login p {
+  margin: 16px 0 24px;
+  color: var(--muted);
+}
+
+.tool-directory {
+  max-width: var(--col);
+  margin: 0 auto;
+  padding: 40px 0 72px;
+  scroll-margin-top: 96px;
+}
+
+.tool-directory h2 {
+  margin-bottom: 24px;
+  font-size: 1.3rem;
+  letter-spacing: -0.02em;
+}
+
+.tool-directory ul {
+  list-style: none;
+}
+
+.tool-directory-link {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding: 22px 0;
+}
+
+.tool-directory-link h3 {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.tool-directory-link p {
+  color: var(--muted);
+  font-size: var(--fs-md);
+}
+
+.tool-directory-link svg {
+  color: var(--accent);
+}
+
+.tool-directory-link:hover h3 {
+  color: var(--accent);
+}
+
+@media (max-width: 720px) {
+  .tool-directory-link {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 16px;
+    padding: 18px 0;
+  }
+
+  .tool-directory-link p {
+    grid-column: 1;
+  }
+
+  .tool-directory-link svg {
+    grid-column: 2;
+    grid-row: 1 / 3;
+  }
+
+  .tool-login {
+    padding-top: 48px;
+    padding-bottom: 64px;
+  }
+}
+
 .empty-state p {
   max-width: 560px;
   color: var(--muted);
@@ -2303,38 +2379,11 @@ a {
   letter-spacing: 0.08em;
 }
 
-.claim-actions,
-.claim-new-account {
+.claim-actions {
   width: 100%;
   max-width: 340px;
   display: grid;
   gap: 10px;
-}
-
-.claim-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: var(--fs-md);
-}
-
-.claim-divider::before,
-.claim-divider::after {
-  content: '';
-  flex: 1;
-  border-top: 1px solid var(--line);
-}
-
-.claim-explorer {
-  color: var(--muted);
-  font-size: var(--fs-md);
-  text-decoration: none;
-}
-
-.claim-explorer:hover {
-  color: var(--ink);
 }
 
 .claim-amount {
@@ -2345,13 +2394,6 @@ a {
 
 .claim-amount span {
   color: var(--accent);
-}
-
-.claim-alt {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
 }
 
 .holdings-links {
@@ -2775,5 +2817,228 @@ a {
   }
   .storage-row > span:last-child:not(:empty) {
     grid-column: 1 / -1;
+  }
+}
+
+/* Staking overview and lockup management. */
+.staking-console {
+  gap: 32px;
+}
+
+.staking-console .card {
+  padding: 24px;
+}
+
+.staking-console .card h2 {
+  font-size: 0.95rem;
+}
+
+.staking-console .meta,
+.staking-console .avail,
+.staking-console .hint,
+.staking-console .validator-table,
+.staking-console .vrow {
+  font-size: 0.75rem;
+}
+
+.staking-console .kv {
+  font-size: 0.85rem;
+}
+
+.staking-console .kv span:first-child {
+  font-size: 0.7rem;
+}
+
+.staking-console .validator-table th {
+  font-size: 0.68rem;
+}
+
+.staking-console .badge {
+  padding: 1px 8px;
+  font-size: 0.6rem;
+}
+
+.staking-console .modes button {
+  font-size: 0.8rem;
+}
+
+.staking-console .staking-total-label {
+  font-size: 0.72rem;
+}
+
+.staking-console .staking-overview-meta {
+  font-size: 0.7rem;
+}
+
+.staking-console .section-label {
+  font-size: 0.66rem;
+}
+
+.staking-console .vrow.active {
+  background: rgba(45, 212, 167, 0.16);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.validator-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.validator-group-heading .section-label {
+  margin: 0 0 0 2px;
+}
+
+.validator-group-heading .validator-search input {
+  width: 160px;
+  min-width: 0;
+  padding: 4px 8px;
+  font-size: 0.75rem;
+}
+
+.staking-console .action-panel > .section-label {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.section-label {
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.staking-overview {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.75fr) minmax(0, 2fr);
+  gap: 32px;
+  align-items: center;
+  padding: 28px;
+  border: 1px solid #303a42;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.staking-overview-summary {
+  align-self: center;
+}
+
+.staking-total {
+  margin-top: 12px;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: clamp(1.9rem, 4vw, 2.8rem);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.staking-total-label {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.staking-overview-meta {
+  margin-top: 18px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.staking-position-list {
+  width: 100%;
+  max-height: 480px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.management-workspace {
+  min-width: 0;
+}
+
+.management-workspace .console {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.workspace-column,
+.action-panel {
+  min-width: 0;
+}
+
+.lockup-badge {
+  border-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+  color: #60a5fa;
+}
+
+.validator-card {
+  overflow: hidden;
+}
+
+.validator-group,
+.validator-group > .card {
+  width: 100%;
+  min-width: 0;
+}
+
+.validator-group,
+.action-panel {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.validator-group > .section-label,
+.action-panel > .section-label {
+  margin: 0 0 0 2px;
+}
+
+.lockup-id {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+.staking-position-list .vrow {
+  padding: 12px 14px;
+}
+
+.staking-position-list .vrow.active .grow {
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .staking-overview {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 20px;
+  }
+  .management-workspace .console {
+    grid-template-columns: 1fr;
+  }
+  .staking-position-list .vrow {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+  .staking-position-list .vrow .grow {
+    flex-basis: 100%;
   }
 }

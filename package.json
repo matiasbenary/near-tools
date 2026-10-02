@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev",
-    "check": "tsc --noEmit && node scripts/check-actions.ts",
+    "check": "tsc --noEmit && node scripts/check-actions.ts && node scripts/check-holdings.ts",
     "fetch:validators": "node scripts/fetch-validators.mjs",
     "prebuild": "npm run fetch:validators",
     "build": "next build",

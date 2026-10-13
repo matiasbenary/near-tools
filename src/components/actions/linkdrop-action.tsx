@@ -95,7 +95,7 @@ export function LinkdropAction() {
     return {
       summary: nft ? `Fund one claim link with "${nftName(nft)}".` : `Fund ${plural(links, 'claim link')} for "${fields.dropName}".`,
       contract: contracts.linkdrop.contractId,
-      method: contracts.linkdrop.createMethod,
+      method: 'create_drop',
       image: nft?.metadata?.media ? { src: nft.metadata.media, alt: nft.metadata.title ?? 'NFT' } : undefined,
       rows: [
         { label: 'Campaign', value: fields.dropName },
@@ -123,7 +123,7 @@ export function LinkdropAction() {
         params: { methodName, args, gas: GAS_300.toString(), deposit: deposit.toString() } }],
     });
     const [outcome] = await signAndSendTransactions({ transactions: [
-      call(contracts.linkdrop.contractId, contracts.linkdrop.createMethod, quote.args, quote.deposit),
+      call(contracts.linkdrop.contractId, 'create_drop', quote.args, quote.deposit),
     ] });
     const encoded = (outcome.status as { SuccessValue?: string }).SuccessValue;
     if (!encoded) throw new UserFacingError('The contract did not return a drop ID.');

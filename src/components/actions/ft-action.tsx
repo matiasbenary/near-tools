@@ -5,7 +5,7 @@ import { useNearWallet } from 'near-connect-hooks';
 import { useQueryClient } from '@tanstack/react-query';
 import { yoctoToNear } from 'near-api-js';
 import { useNetwork } from '@/components/app-providers';
-import { ActionContracts, FtCreateArgs, ftTotalSupply } from '@/lib/actions/contracts';
+import { ActionContracts, FtCreateArgs, ftTotalSupply, normalizeSymbol } from '@/lib/actions/contracts';
 import { GAS_300, txHashOf } from '@/lib/near';
 import { loadHoldings, saveHoldings, type HeldToken } from '@/lib/holdings';
 import { Field, ImageField, useForm } from './form-fields';
@@ -22,7 +22,7 @@ export function FtAction() {
   const factory = ActionContracts[network].ft;
   const queryClient = useQueryClient();
   const symbol = fields.symbol.toUpperCase();
-  const tokenAccount = fields.symbol ? factory.accountFor(fields.symbol) : '';
+  const tokenAccount = fields.symbol ? `${normalizeSymbol(fields.symbol)}.${factory.contractId}` : '';
 
   const args = (): FtCreateArgs => ({
     owner_id: owner,
@@ -54,19 +54,18 @@ export function FtAction() {
       return null;
     }
 
-    const quote = factory.quote(args(), owner);
     const required = BigInt(
       (await viewFunction({
-        contractId: quote.contractId,
-        method: quote.method,
-        args: quote.args as Record<string, unknown>,
+        contractId: factory.contractId,
+        method: 'get_required',
+        args: { args: args() },
       })) as string
     );
     setDeposit(required);
     return {
       summary: `Create the token contract ${tokenAccount}, owned by ${owner}.`,
       contract: factory.contractId,
-      method: factory.createMethod,
+      method: 'create_token',
       image: { src: fields.icon, alt: `Icon for ${symbol}` },
       rows: [
         { label: 'Token', value: `${fields.name} (${symbol})` },
@@ -84,7 +83,7 @@ export function FtAction() {
   const submit = async () => {
     const outcome = await callFunction({
       contractId: factory.contractId,
-      method: factory.createMethod,
+      method: 'create_token',
       args: { args: args() },
       gas: GAS_300.toString(),
       deposit: deposit.toString(),

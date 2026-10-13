@@ -2,14 +2,7 @@ import { nearToYocto } from 'near-api-js';
 import { FungibleToken } from 'near-api-js/tokens';
 import type { NetworkId } from '@/config';
 
-/**
- * Every contract ID, method name and deposit formula for the FT / NFT / Linkdrop
- * actions lives here, once, per network.
- *
- * Verified against free.rpc.fastnear.com and test.rpc.fastnear.com on 2026-09-21:
- *  - nft.primitives.{near,testnet} differ in code_hash but expose the same NEP-171 surface.
- * FT factory quote calls are configured separately for each network.
- */
+/** Network-specific contract IDs and shared token types and unit helpers. */
 
 export type ActionKind = 'ft' | 'nft' | 'linkdrop';
 
@@ -27,62 +20,16 @@ export type FtCreateArgs = {
   metadata: FtMetadata;
 };
 
-/** A view call the caller passes straight to viewFunction(). Kept as data so it is testable. */
-export type ViewRequest = { contractId: string; method: string; args: unknown };
-
-type FtFactory = {
-  contractId: string;
-  /** Token accounts are derived from the symbol — the user never types one. */
-  accountFor: (symbol: string) => string;
-  /** Exact deposit for this token, in yocto. Interface differs per network. */
-  quote: (args: FtCreateArgs, accountId: string) => ViewRequest;
-  createMethod: string;
-};
-
-export const ActionContracts: Record<
-  NetworkId,
-  {
-    ft: FtFactory;
-    nft: { contractId: string; mintMethod: string };
-    linkdrop: {
-      contractId: string;
-      createMethod: string;
-    };
-  }
-> = {
+export const ActionContracts: Record<NetworkId, Record<ActionKind, { contractId: string }>> = {
   mainnet: {
-    ft: {
-      contractId: 'token.primitives.near',
-      accountFor: (symbol) => `${normalizeSymbol(symbol)}.token.primitives.near`,
-      quote: (args, accountId) => ({
-        contractId: 'token.primitives.near',
-        method: 'get_required',
-        args: { args, account_id: accountId },
-      }),
-      createMethod: 'create_token',
-    },
-    nft: { contractId: 'nft.primitives.near', mintMethod: 'nft_mint' },
-    linkdrop: {
-      contractId: 'linkdrop.primitives.near',
-      createMethod: 'create_drop',
-    },
+    ft: { contractId: 'token.primitives.near' },
+    nft: { contractId: 'nft.primitives.near' },
+    linkdrop: { contractId: 'linkdrop.primitives.near' },
   },
   testnet: {
-    ft: {
-      contractId: 'token.primitives.testnet',
-      accountFor: (symbol) => `${normalizeSymbol(symbol)}.token.primitives.testnet`,
-      quote: (args) => ({
-        contractId: 'token.primitives.testnet',
-        method: 'get_required',
-        args: { args },
-      }),
-      createMethod: 'create_token',
-    },
-    nft: { contractId: 'nft.primitives.testnet', mintMethod: 'nft_mint' },
-    linkdrop: {
-      contractId: 'linkdrop.primitives.testnet',
-      createMethod: 'create_drop',
-    },
+    ft: { contractId: 'token.primitives.testnet' },
+    nft: { contractId: 'nft.primitives.testnet' },
+    linkdrop: { contractId: 'linkdrop.primitives.testnet' },
   },
 };
 

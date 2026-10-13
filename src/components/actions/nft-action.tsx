@@ -36,7 +36,7 @@ export function NftAction() {
     return {
       summary: `Mint "${fields.title}" into ${collection.contractId}, owned by ${owner}.`,
       contract: collection.contractId,
-      method: collection.mintMethod,
+      method: 'nft_mint',
       image: { src: fields.media, alt: fields.title },
       rows: [
         { label: 'Title', value: fields.title },
@@ -61,7 +61,7 @@ export function NftAction() {
     const args = mintArgs(`${IPFS}/ipfs/${cid}`);
     const outcome = await callFunction({
       contractId: collection.contractId,
-      method: collection.mintMethod,
+      method: 'nft_mint',
       args,
       gas: GAS_300.toString(),
       deposit: nftMintDeposit(args).toString(),
